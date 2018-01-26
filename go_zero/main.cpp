@@ -94,25 +94,19 @@ void play(bool verbose=true)
             std::cout << ", value: " << value;
             std::cout << ", time: " << ns.count()*1.0/1000000000 << " seconds" << std::endl;
             board.display(n);
+            /*if(n==NN)
+            {
+                if((board.score()>0 && board.current==WHITE)
+                 ||(board.score()<0 && board.current==BLACK))
+                 {
+                    std::cout << "pause" << std::endl;
+                 }
+                
+            }*/
         }
 
         board.action(n);
-        //t.root = &(t.root->children[n]);
-        
-        TreeNode* newRoot = new TreeNode();
-        *(newRoot) = t.root->children[n];
-        t.root->children[n].children = nullptr;
-        newRoot->parent = nullptr;
-        if(newRoot->children != nullptr)
-        {
-            assert(newRoot->children[0].parent == &t.root->children[n]);
-            for(int i=0; i<NN+1; i++)
-                newRoot->children[i].parent = newRoot;
-        }
-        
-        t.delete_tree(t.root);
-        delete t.root;
-        t.root = newRoot;
+        t.change_root(t.root->children[n]);
     }
 
     std::cout << "winner: " << board.status() << " score: " << board.score() << " steps: " << board.steps << std::endl;

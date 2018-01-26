@@ -163,6 +163,23 @@ public:
         }
     }
     
+    void change_root(TreeNode& node)
+    {
+        TreeNode* newRoot = new TreeNode();
+        *(newRoot) = node;
+        node.children = nullptr;
+        newRoot->parent = nullptr;
+        if(newRoot->children != nullptr)
+        {
+            for(int i=0; i<NN+1; i++)
+                newRoot->children[i].parent = newRoot;
+        }
+        
+        delete_tree(root);
+        delete root;
+        root = newRoot;
+    }
+    
     int search(Board& board, double &value, int rep = 0)
     {
         this->root->pos = board.position;
@@ -190,10 +207,6 @@ public:
         });
         
         int n = (int)distance(v.begin(), max_element(v.begin(), v.end()));
-        if(n==NN)
-        {
-            std::cout<<"action pass"<<std::endl;
-        }
         value = -root->children[n].mean_value;
         return n;
     }
@@ -201,12 +214,13 @@ public:
     void simulate(Board& board)
     {
         Board local_board = board;
+
         TreeNode* current_node = root;
         //current_node->visits++;
         while(!current_node->is_leaf())
         {
             int action = this->select(current_node);
-            //local_board.action(action);
+            
             Step s;
             
             s.state = current_node->pos.get_board();
@@ -215,6 +229,7 @@ public:
             s.value = 0.0;
             
             local_board.history.push_back(s);
+            local_board.steps++;
             
             current_node = &(current_node->children[action]);
             //current_node->visits++;
@@ -223,8 +238,13 @@ public:
         if(current_node->parent != nullptr)
         {
             local_board.position = current_node->parent->pos;
+            local_board.current = BLACK+(current_node->parent->level)%2;
+            
+            //since the above code did not actually action on the board, we need to take one step back
+            local_board.steps--;
             local_board.action(current_node->id);
         }
+        
         int status = local_board.status();
         
         double v = 0.0;
@@ -258,13 +278,14 @@ public:
     
     double expand(TreeNode* leaf, Board& board)
     {
-        if(leaf->parent != nullptr)
+        /*if(leaf->parent != nullptr)
         {
             board.position = leaf->parent->pos;
             board.current = BLACK+(leaf->parent->level)%2;
             board.action(leaf->id);
             leaf->pos = board.position;
-        }
+        }*/
+        leaf->pos = board.position;
         
 
         std::string s;
@@ -299,7 +320,7 @@ public:
             v = v / sum_of_probs;
         });
 
-        double value = std::tanh(dis(gen));
+        double value = std::tanh(10*(dis(gen)-1.5));
         
         // end of evaluation
         
