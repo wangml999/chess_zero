@@ -14,9 +14,7 @@
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "449"
-            endingLineNumber = "449"
-            landmarkName = "main(int argc, const char * argv[])"
-            landmarkType = "9">
+            endingLineNumber = "449">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
