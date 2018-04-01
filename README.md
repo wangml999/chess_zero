@@ -41,5 +41,5 @@ python3 train.py 9
 ```
 it will then read and save models from 9x9/models direcory. if there is no model in the directory, it wil save one which is the random one prior to any training.
 
-* change the macro WN in fast_go.h to a different number e.g. 9. and recompile the source code. 
+* change the macro WN in makefile to a different number e.g. 9. and recompile the source code. 
 
