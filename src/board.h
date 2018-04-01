@@ -13,7 +13,7 @@
 #include <queue>
 #include "fast_go.h"
 #include "boost/circular_buffer.hpp"
-
+#include <iomanip>
 
 using namespace std;
 using namespace boost;
@@ -22,40 +22,58 @@ using namespace boost;
 struct Step
 {
     string state;
-    int player;
+    char player;
     int action;
     double value;
 };
 
-#define SLICES 17
+#define SLICES 7  //maximum 7 history steps plus current state equals 8 to what the paper defines 
 class Board
 {
 public:
-    boost::circular_buffer<Step> history;
+    //boost::circular_buffer<Step> history;
+    int last_actions[2];
+    int action_index;
+    
     Position position;
     char current;
-    string state;
+    //string state;
     bool symmetrical;
     int action_space;
     int steps;
     
-    Board() : position(Position::initial_state())
+    Board()
     {
+        position = Position::initial_state();
         symmetrical = true;
         action_space = NN + 1;
         current = BLACK;
         steps = 0;
-        state = position.get_board();
-        history = boost::circular_buffer<Step>(3);
+        
+        action_index = 0;
+        last_actions[0] = -1;
+        last_actions[1] = -1;
+        //state = position.get_board();
+        //history = boost::circular_buffer<Step>(SLICES);
+    }
+    
+    Board(const char *initial_state, char player) : Board()
+    {
+        this->position = Position(string(initial_state), NONE);
+        current = player;
     }
     
     void Reset()
     {
         position = Position::initial_state();
-        state = position.get_board();
         current = BLACK;
-        history.clear();
+        //history.clear();
         steps = 0;
+
+        action_index = 0;
+        last_actions[0] = -1;
+        last_actions[1] = -1;
+        
     }
     
     vector<int> possible_actions()
@@ -70,20 +88,21 @@ public:
 
     void action(int n)
     {
-        Step s;
+        /*Step s;
         
-        s.state = this->state;
+        s.state = this->position.get_board(); //state;
         s.player = this->current;
         s.action = n;
-        s.value = 0.0;
+        s.value = 0.0;*/
+        //history.push_back(s);
+
+        last_actions[action_index] = n;
+        action_index = (action_index + 1) % 2;
         
-        history.push_back(s);
-
-        steps += 1;
-
         if(n != NN)
             position = position.play_move(n, current);
-            state = position.get_board();
+        
+        steps += 1;
         current = position.swap_colors(current);
     }
     
@@ -95,7 +114,8 @@ public:
 
         bool game_finished = false;
 
-        if (history.size()>=2 && (history.end()[-2]).action == NN && history.end()[-1].action == NN)
+        //if (history.size()>=2 && (history.end()[-2]).action == NN && history.end()[-1].action == NN)
+        if(last_actions[0]==NN && last_actions[1]==NN)
             game_finished = true;
         else if (steps >= NN * 2)
             game_finished = true;
@@ -129,14 +149,30 @@ public:
         enum class Color {BBLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WWHITE};
 
         int board_color = 37;
-        std::string w = "\033[1;" + std::to_string(board_color) + "m+" + "\033[0m";
+        std::string w = "\033[1;" + std::to_string(board_color) + "m." + "\033[0m";
         std::string a = "\033[1;" + std::to_string(31) + "mx" + "\033[0m";
         std::string b = "\033[1;" + std::to_string(32) + "mo" + "\033[0m";
         std::string y = "\033[1;" + std::to_string(33) + "m*" + "\033[0m";
 
         std::string s = "";
-        for(int i =0; i<NN; i++)
+        std::string header = "    ";
+        //the header line
+        for(int i=0; i<WN; i++)
         {
+            std::string tmp = w;
+            char column_header = 'A' + i;
+            std::replace(tmp.begin(), tmp.end(), '.', column_header);
+            header += tmp;
+            header += "\033[1;" + std::to_string(board_color) + "m " + "\033[0m";
+        }
+
+        std::cout << header << std::endl;
+        for(int i=0; i<NN; i++)
+        {
+            if( i % WN == 0)
+            {
+                
+            }
             if (i == next_move)
             {
                 if (this->current == BLACK)
@@ -158,6 +194,7 @@ public:
                     s += y;
                 else
                 {
+                    std::string state = this->position.get_board();
                     switch(state[i])
                     {
                         case EMPTY:
@@ -174,14 +211,16 @@ public:
             }
 
             if ((i % WN) == (WN-1))
-                s += "\n";
+            {
+                std::cout << std::setw(3) << WN-i/WN << " " << s << std::endl;
+                s = "";
+            }
             else
             {
-                s += "\033[1;" + std::to_string(board_color) + "m-" + "\033[0m";
+                s += "\033[1;" + std::to_string(board_color) + "m " + "\033[0m";
             }
         }
-
-        std::cout << s << std::endl;
+        std::cout << std::endl;
     }
 };
 

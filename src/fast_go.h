@@ -16,6 +16,7 @@
 #include <numeric>
 #include <array>
 #include <unordered_set>
+#include <algorithm>
 
 #define WHITE '2'
 #define BLACK '1'
@@ -67,10 +68,81 @@ public:
         return s;
     }
     
+    //if stone fills into opponent's eye, it might be a suicide that will not change the board
+    //if stone fills into its own eye, it might be suicide but wil change the board.
+    //if stone has empty neighbour, it will not be removed so will change the board
+    //so this function basically is to check if it fills into opponent's eye and did not kill any neighours
+    bool board_not_changed(int fc, char color)
+    {
+        char possible_ko_color;
+        bool is_ko = is_koish(board, fc, possible_ko_color);
+        if(!is_ko)
+            return false;
+        if(possible_ko_color == color)
+            return false;
+
+        char opp_color = swap_colors(color);
+        std::vector<int> opp_stones;
+        std::vector<int> my_stones = {fc};
+        
+        neighbor_count = get_valid_neighbors(fc, neighbors);
+        std::vector<int>::iterator it;
+        for(int i=0; i<neighbor_count; i++)
+        {
+            int fn = neighbors[i];
+            if (board[fn] == EMPTY)
+                return false; //neight has liberty
+            opp_stones.push_back(fn);
+        }
+        
+        std::string new_board = place_stone(color, board, fc);
+        //check all opponent neighbours to see if any of them would be captured meaning no liberty.
+        for(it=opp_stones.begin(); it!=opp_stones.end(); ++it)
+        {
+            if(!has_liberty(new_board, *it))
+                return false;
+        }
+
+        return true;
+    }
+    
+    bool has_liberty(std::string board, int fc)
+    {
+        int frontier[NN];
+        int frontier_count = 0;
+        
+        char color = board[fc];
+        frontier[frontier_count++] = fc;
+        
+        std::unordered_set<int> chain;
+        while (frontier_count>0)
+        {
+            int current_fc = frontier[--frontier_count];
+            
+            chain.insert(current_fc);
+            
+            neighbor_count = get_valid_neighbors(current_fc, neighbors);
+            for (int i = 0; i < neighbor_count; ++i)
+            {
+                int nfc = neighbors[i];
+                if (board[nfc] == color && chain.find(nfc)==chain.end())
+                    frontier[frontier_count++] = nfc;
+                else if (board[nfc] == EMPTY)
+                    return true;
+            }
+        }
+        //cannot reach to an empty
+        return false;
+    }
+    
     Position play_move(int fc, char color)
     {
         if (fc == this->ko || this->board[fc] != EMPTY)
+        {
+            std::cout << "board=" << this->board << std::endl;
+            std::cout << "fc=" << fc << std::endl;
             throw std::invalid_argument( "illegal move" );
+        }
 
         char possible_ko_color;
         bool is_ko = is_koish(board, fc, possible_ko_color);
@@ -151,50 +223,44 @@ public:
     
     std::vector<int> possible_moves(char color)
     {
-        std::vector<int> moves;
-        for(int move=0; move<board.length(); move++)
-        {
-            if(board[move]==EMPTY && move!=ko)
-            {
-                /*char ko_color;
-                is_koish(board, move, ko_color);
-                
-                if (ko_color != swap_colors(color))
-                    moves.push_back(move);
-                else
-                {
-                    Position new_p = this->play_move(move, color);
-                    if (new_p.board != this->board)  //play changed the board
-                        moves.push_back(move);
-                }*/
-                moves.push_back(move);
-            }
-        }
-
-        //allow pass which is the last action
-        moves.push_back(NN);
-        return moves;
-    }
-    
-    std::vector<int> not_allowed_actions(char color)
-    {
-        std::array<int, NN+1> moves; // vector with all moves + pass
-        std::vector<int> allowed_moved = possible_moves(color);
+        std::array<int, NN+1> moves; // vector with all moves
+        std::vector<int> disallowed_moved = not_allowed_actions(color);
         
         std::iota (std::begin(moves), std::end(moves), 0); // Fill with 0, 1, ..., 99.
         
         std::sort(moves.begin(), moves.end());
-        std::sort(allowed_moved.begin(), allowed_moved.end());
+        std::sort(disallowed_moved.begin(), disallowed_moved.end());
         
         std::vector<int> difference;
         std::set_difference(
             moves.begin(), moves.end(),
-            allowed_moved.begin(), allowed_moved.end(),
+            disallowed_moved.begin(), disallowed_moved.end(),
             std::back_inserter( difference )
         );
+
         return difference;
     }
+    
+    std::vector<int> not_allowed_actions(char color)
+    {
+        std::vector<int> moves;
 
+        for(int move=0; move<board.length(); move++)
+        {
+            if(board[move]!=EMPTY || move==ko)
+                moves.push_back(move);
+            else
+            {
+                if(board_not_changed(move, color)) // not changing the board, then it is not legal
+                {
+                    moves.push_back(move);
+                }
+            }
+        }
+
+        return moves;
+    }
+    
     char swap_colors(const char color)
     {
         if (color == BLACK)
@@ -205,6 +271,16 @@ public:
             return color;
     }
 
+    bool is_koish(int fc, char c)
+    {
+        char possible_ko_color;
+        bool is_ko = is_koish(board, fc, possible_ko_color);
+        if(is_ko && possible_ko_color == swap_colors(c))
+            return true;
+        else
+            return false;
+    }
+    
 private:
     int neighbors[4];
     int neighbor_count;
@@ -303,7 +379,7 @@ private:
 
     //if is ko, return true and surrounding color
     //if not, return false and EMPTY color
-    bool is_koish(std::string board, int fc, char& color)
+    bool is_koish(std::string& board, int fc, char& color)
     {
         if (board[fc] != EMPTY)
             return false;

@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E1228A3A201B3A6C00BF6B02"
+               BlueprintIdentifier = "E16215EF206EFF210054C95C"
                BuildableName = "go_zero"
                BlueprintName = "go_zero"
                ReferencedContainer = "container:go_zero.xcodeproj">
@@ -32,7 +32,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "E1228A3A201B3A6C00BF6B02"
+            BlueprintIdentifier = "E16215EF206EFF210054C95C"
             BuildableName = "go_zero"
             BlueprintName = "go_zero"
             ReferencedContainer = "container:go_zero.xcodeproj">
@@ -42,7 +42,7 @@
       </AdditionalOptions>
    </TestAction>
    <LaunchAction
-      buildConfiguration = "Debug"
+      buildConfiguration = "Release"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       launchStyle = "0"
@@ -55,7 +55,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "E1228A3A201B3A6C00BF6B02"
+            BlueprintIdentifier = "E16215EF206EFF210054C95C"
             BuildableName = "go_zero"
             BlueprintName = "go_zero"
             ReferencedContainer = "container:go_zero.xcodeproj">
@@ -74,7 +74,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "E1228A3A201B3A6C00BF6B02"
+            BlueprintIdentifier = "E16215EF206EFF210054C95C"
             BuildableName = "go_zero"
             BlueprintName = "go_zero"
             ReferencedContainer = "container:go_zero.xcodeproj">
