@@ -5,12 +5,12 @@ This is a study project. The aim is to implement an AI go program according to D
 * a player written in c++11. 
 * a trainer written in python 3. 
 
-## What's required
+## what's required
 * compile tensorflow from source code. following the link to install tensorflow https://www.tensorflow.org/install/install_sources
 * I am using r1.6. later version has not been tested. one addtional step after compile tensorflow as per the instruction is to compile the //tensorflow:libtensorflow.so which will be used in the c++ player. 
 * The tensorflow include and lib paths in the makefile need to be updated accordingly. or update in xcode if compiling on mac os x.
 
-## How to run it
+## how to run it
 * self play  
 ```shell
 ./go_zero -n 0 -s 
@@ -33,3 +33,13 @@ This is a study project. The aim is to implement an AI go program according to D
 * training
 
 run train.py in python 3 will load the latest saved model and start looking for the self play data files. it will then randomly sample the moves and batch into mini batches to train the network. after x number of steps, it will compare with the latest model by running two passes evaluation to get the better network. the better network is saved as latest model or discarded. 
+
+## other board sizes
+* run the train.py with a size argument e.g. 
+```shell 
+python3 train.py 9
+```
+it will then read and save models from 9x9\models direcory. if there is no model in the directory, it wil save one which is the random one prior to any training.
+
+* change the macro WN in fast_go.h to a different number e.g. 9. and recompile the source code. 
+
