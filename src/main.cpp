@@ -131,6 +131,57 @@ string get_last_model(string path)
     return model;
 }
 
+int gtp_to_int(string str)
+{
+    int n = -1;
+    std::transform(str.begin(), str.end(),str.begin(), ::toupper);
+    if(str=="PASS")
+        n = NN;
+    else
+    {
+        if(str.length() == 2)
+        {
+            int row, col;
+            col = (str[0] - 'A');
+            if(str[0]>='J')
+                col--;
+            if(col >= 0 && col < WN)
+            {
+                row = str[1] - '1';
+                if(row >= 0 && row < WN)
+                {
+                    row = WN - row - 1;
+                    n = row * WN + col;
+                }
+            }
+        }
+    }
+    return n;
+}
+
+string int_to_gtp(int n)
+{
+    int row, col;
+    string gtp = "";
+    
+    if(n>=0 && n<=NN)
+    {
+        if(n == NN)
+            return "PASS";
+    
+        row = n / WN;
+        col = n % WN;
+        
+        char column_header = col + 'A';
+        if(column_header>='I')
+           column_header++;
+        
+        gtp = std::string(1, column_header)+std::to_string(WN-row);
+    }
+    
+    return gtp;
+}
+
 void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool verbose=true)
 {
     auto game_start = std::chrono::high_resolution_clock::now();
@@ -187,8 +238,15 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
 
             do
             {
+                string str;
+                
                 std::cout << "next:";
-                std::cin >> n;
+                std::getline (std::cin, str);
+
+                n = gtp_to_int(str);
+                if( n == -1)
+                    continue;
+                
                 available_actions = board.possible_actions();
             }while(!std::any_of(available_actions.begin(), available_actions.end(), [=](int i){return i==n;}));
         }
@@ -203,10 +261,7 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
         {
             std::cout << "step: " << board.steps << ", current: " << board.current << ", action: ";
         
-            if(n==NN)
-                std::cout << "pass";
-            else
-                std::cout << n;
+            std::cout << int_to_gtp(n);
         
             //std::cout << ", score: " << board.score();
             std::cout << ", value: " << value;
