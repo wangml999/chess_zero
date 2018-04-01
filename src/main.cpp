@@ -265,7 +265,7 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
     auto game_end = std::chrono::high_resolution_clock::now();
     auto diff = game_end-game_start;
     std::chrono::nanoseconds game_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diff);
-    std::cout << "winner: " << status << " score: " << board.score() << " steps: " << board.steps << " time: " << game_ns.count()*1.0/1000000000 << " seconds" << std::endl;
+    std::cout << "winner: " << status << " score: " << std::fixed << std::setprecision(1) << board.score() << " steps: " << board.steps << " time: " << game_ns.count()*1.0/1000000000 << " seconds" << std::endl;
 }
 
 int main(int argc, const char * argv[])

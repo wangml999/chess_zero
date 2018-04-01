@@ -139,7 +139,7 @@ public:
 
         if (game_finished)
         {
-            float score = position.score() - KOMI;
+            float score = position.score();
             if (score >0)
                 return 1;
             else if (score < 0)
@@ -150,7 +150,7 @@ public:
         return -1; //unknown
     }
     
-    int score()
+    float score()
     {
         return this->position.score();
     }

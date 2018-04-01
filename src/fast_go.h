@@ -45,7 +45,7 @@ SOFTWARE.*/
 #if WN==19
     #define KOMI 7.5
 #else
-    #define KOMI 0
+    #define KOMI 0.0
 #endif
 
 #define NN WN*WN
@@ -215,7 +215,7 @@ public:
         return Position(new_board, new_ko);
     };
     
-    int score()
+    float score()
     {
         if(this->board == std::string(NN, EMPTY))
             return 0;
@@ -241,7 +241,8 @@ public:
             }
         }
         return ((int)std::count(working_board.begin(), working_board.end(), BLACK) \
-             - (int)std::count(working_board.begin(), working_board.end(), WHITE));
+             - (int)std::count(working_board.begin(), working_board.end(), WHITE)) \
+             -  KOMI;
     }
     
     std::vector<int> possible_moves(char color)
