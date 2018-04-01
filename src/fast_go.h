@@ -38,7 +38,10 @@ SOFTWARE.*/
 
 #define NONE -1
 
-#define WN 5
+#ifndef WN
+    #define WN 5
+#endif
+
 #define NN WN*WN
 
 class Position
