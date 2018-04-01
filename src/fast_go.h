@@ -42,6 +42,12 @@ SOFTWARE.*/
     #define WN 5
 #endif
 
+#if WN==19
+    #define KOMI 7.5
+#else
+    #define KOMI 0
+#endif
+
 #define NN WN*WN
 
 class Position

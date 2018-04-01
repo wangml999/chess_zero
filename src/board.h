@@ -139,7 +139,7 @@ public:
 
         if (game_finished)
         {
-            int score = position.score();
+            float score = position.score() - KOMI;
             if (score >0)
                 return 1;
             else if (score < 0)
@@ -172,6 +172,8 @@ public:
         {
             std::string tmp = w;
             char column_header = 'A' + i;
+            if(i>=9)
+                column_header++;
             std::replace(tmp.begin(), tmp.end(), '.', column_header);
             header += tmp;
             header += "\033[1;" + std::to_string(board_color) + "m " + "\033[0m";
