@@ -1,5 +1,5 @@
 CC=g++
-N=9
+WN=5
 tensorflow=/home/minglei/Downloads/tensorflow/
 bazel-genfiles=$(tensorflow)bazel-genfiles/ 
 package-include=/usr/local/lib/python3.5/dist-packages/tensorflow/include/ 
@@ -8,7 +8,7 @@ nsync=$(tensorflow)bazel-tensorflow/external/nsync/public/
 bazel-bin=$(tensorflow)bazel-bin/tensorflow/
 
 go_zero: go_zero
-	$(CC) -Wall -O3 main.cpp -o ../bin/go_zero -std=c++11 -D N=$(N) -I$(tensorflow) -I$(bazel-genfiles) -I$(package-include) -I$(eigen) -I$(nsync) -I$(bazel-bin) -L$(bazel-bin) -ltensorflow_cc -ltensorflow_framework -pthread
+	$(CC) -Wall -O3 main.cpp -o ../bin/go_zero -std=c++11 -D WN=$(WN) -I$(tensorflow) -I$(bazel-genfiles) -I$(package-include) -I$(eigen) -I$(nsync) -I$(bazel-bin) -L$(bazel-bin) -ltensorflow_cc -ltensorflow_framework -pthread
 
 go_zero_d: go_zero_d
 	$(CC) -Wall main.cpp -o ../bin/go_zero_d -std=c++11 -I$(tensorflow) -I$(bazel-genfiles) -I$(package-include) -I$(eigen) -I$(nsync) -I$(bazel-bin) -L$(bazel-bin) -ltensorflow_cc -ltensorflow_framework -pthread
