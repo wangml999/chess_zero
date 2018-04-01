@@ -245,7 +245,6 @@
 				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
 				FRAMEWORK_SEARCH_PATHS = "/Users/wangm/tensorflow/bazel-bin/tensorflow";
 				HEADER_SEARCH_PATHS = (
-					/Users/wangm/boost_1_66_0/include,
 					/Users/wangm/tensorflow,
 					"/Users/wangm/eigen-git-mirror",
 					"/Users/wangm/tensorflow/bazel-genfiles",
@@ -264,7 +263,6 @@
 				CONFIGURATION_BUILD_DIR = ../../bin;
 				FRAMEWORK_SEARCH_PATHS = "/Users/wangm/tensorflow/bazel-bin/tensorflow";
 				HEADER_SEARCH_PATHS = (
-					/Users/wangm/boost_1_66_0/include,
 					/Users/wangm/tensorflow,
 					"/Users/wangm/eigen-git-mirror",
 					"/Users/wangm/tensorflow/bazel-genfiles",

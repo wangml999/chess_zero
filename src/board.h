@@ -27,12 +27,9 @@ SOFTWARE.*/
 #include <string>
 #include <queue>
 #include "fast_go.h"
-#include "boost/circular_buffer.hpp"
 #include <iomanip>
 
 using namespace std;
-using namespace boost;
-
 
 struct Step
 {
@@ -46,7 +43,6 @@ struct Step
 class Board
 {
 public:
-    //boost::circular_buffer<Step> history;
     int last_actions[2];
     int action_index;
     
