@@ -172,7 +172,7 @@ public:
         {
             std::string tmp = w;
             char column_header = 'A' + i;
-            if(i>=9)
+            if(i>=8)
                 column_header++;
             std::replace(tmp.begin(), tmp.end(), '.', column_header);
             header += tmp;
