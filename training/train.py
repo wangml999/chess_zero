@@ -324,4 +324,9 @@ def train(N):
             #reps += 1
 
 if __name__ == "__main__":
-    train(5)
+    import sys
+
+    n = 5
+    if len(sys.argv) == 2:
+        n = int(sys.argv[1])
+    train(n)
