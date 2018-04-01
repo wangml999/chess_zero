@@ -2,3 +2,5 @@ bin/
 build/xcode/go_zero.xcodeproj/project.xcworkspace/xcuserdata/
 build/xcode/go_zero.xcodeproj/xcuserdata/
 .DS_Store
+training/log/
+training/.idea/

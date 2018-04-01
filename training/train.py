@@ -161,7 +161,8 @@ def train(N):
         # restore from previous checkpoint
         last_model, generation = get_last_model(model_path)
         if last_model != "":
-            training_network.restore_model('./model/')
+            #training_network.restore_model('./model/')
+            tf.saved_model.loader.load(sess, ['SERVING'], last_model)
         else:
             #code below is to create an initial model
             print("no model was found. create an initial model")
@@ -323,4 +324,4 @@ def train(N):
             #reps += 1
 
 if __name__ == "__main__":
-    train(13)
+    train(5)
