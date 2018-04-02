@@ -291,7 +291,7 @@ def train(N):
 if __name__ == "__main__":
     import sys
 
-    n = 19
+    n = 5
     if len(sys.argv) == 2:
         n = int(sys.argv[1])
     train(n)
