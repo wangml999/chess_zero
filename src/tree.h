@@ -318,8 +318,10 @@ public:
         {
             int action = this->select(current_node);
 
-            local_board.last_actions[local_board.action_index] = action;
-            local_board.action_index = (local_board.action_index + 1) % 2;
+            if(action==NN)
+                local_board.pass_count++;
+            else
+                local_board.pass_count = 0;
             
             local_board.steps++;
             
