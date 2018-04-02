@@ -9,6 +9,7 @@ import datetime
 import os
 import sys
 import config
+import shutil
 
 class data_manager:
     def __init__(self, path):
@@ -262,7 +263,6 @@ def train(N):
                 filename = training_network.save_model("./checkpoints/training.ckpt")
 
                 if os.path.exists(model_path+'temp/'):
-                    import shutil
                     shutil.rmtree(model_path+'temp/')
 
                 builder = tf.saved_model.builder.SavedModelBuilder(model_path+'temp/')
