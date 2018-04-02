@@ -43,8 +43,7 @@ struct Step
 class Board
 {
 public:
-    int last_actions[2];
-    int action_index;
+    int pass_count;
     
     Position position;
     char current;
@@ -61,11 +60,7 @@ public:
         current = BLACK;
         steps = 0;
         
-        action_index = 0;
-        last_actions[0] = -1;
-        last_actions[1] = -1;
-        //state = position.get_board();
-        //history = boost::circular_buffer<Step>(SLICES);
+        pass_count = 0;
     }
     
     Board(const char *initial_state, char player) : Board()
@@ -78,13 +73,10 @@ public:
     {
         position = Position::initial_state();
         current = BLACK;
-        //history.clear();
+        
         steps = 0;
 
-        action_index = 0;
-        last_actions[0] = -1;
-        last_actions[1] = -1;
-        
+        pass_count = 0;
     }
     
     vector<int> possible_actions()
@@ -99,20 +91,14 @@ public:
 
     void action(int n)
     {
-        /*Step s;
-        
-        s.state = this->position.get_board(); //state;
-        s.player = this->current;
-        s.action = n;
-        s.value = 0.0;*/
-        //history.push_back(s);
-
-        last_actions[action_index] = n;
-        action_index = (action_index + 1) % 2;
-        
         if(n != NN)
+        {
             position = position.play_move(n, current);
-        
+            pass_count = 0;
+        }
+        else
+            pass_count++;
+
         steps += 1;
         current = position.swap_colors(current);
     }
@@ -126,16 +112,10 @@ public:
         bool game_finished = false;
 
         //if (history.size()>=2 && (history.end()[-2]).action == NN && history.end()[-1].action == NN)
-        if(last_actions[0]==NN && last_actions[1]==NN)
+        if(pass_count == 2)
             game_finished = true;
         else if (steps >= NN * 2)
             game_finished = true;
-        /*else
-        {
-            vector<int> moves = possible_actions();
-            if (moves.size() == 1 || (moves.size()==1 && moves[0] == position.ko))
-                game_finished = true;
-        }*/
 
         if (game_finished)
         {

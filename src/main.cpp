@@ -240,7 +240,10 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
             {
                 string str;
                 
-                std::cout << "next:";
+                if(board.current + '0' == BLACK)
+                    std::cout << "(x) next: ";
+                else
+                    std::cout << "(o) next: ";
                 std::getline (std::cin, str);
 
                 n = gtp_to_int(str);
