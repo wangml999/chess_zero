@@ -8,6 +8,7 @@ import glob
 import datetime
 import os
 import sys
+import config
 
 class data_manager:
     def __init__(self, path):
@@ -54,12 +55,12 @@ class data_manager:
         #return list(itertools.chain.from_iterable(data))
         return data
 
-    def load_data2(self, most_recent_games, generation):
+    def load_data2(self, most_recent_games, generation, N):
         file_list = [file for file in glob.glob(self.path+"/"+"selfplay-*.txt")]
         if len(file_list) < most_recent_games:
             return None, None
 
-        file_list = file_list[:10]
+        file_list = file_list[:most_recent_games]
         data = []
         n = 0
         current_player, opponent = 1, 2
@@ -70,9 +71,9 @@ class data_manager:
                 for line in f:
                     mylist = line.rstrip('\n').split(',')
                     state = mylist[0]
-                    if state == '0'*25:
+                    if state == '0'*(N*N):
                         current_player, opponent = 1, 2
-                    if len(mylist) == 29:
+                    if len(mylist) == (N*N+1+3):
                         player = current_player
                         current_player, opponent = opponent, current_player
                         action = int(mylist[1])
@@ -133,26 +134,41 @@ def get_last_model(path):
     fields = file_list[-1].split('-')
     return file_list[-1], int(fields[1])
 
+def evaluate(cmd, model1, model2, num_games, verbose=False):
+    import subprocess
+    proc = subprocess.Popen([cmd, '-m1', model1, '-m2', model2, '-s', '-n', str(num_games)],
+                            stdout=subprocess.PIPE)
+
+    win1, win2 = 0, 0
+    while True:
+        line = proc.stdout.readline().decode('utf-8')
+        if line != '' and 'winner' in line:
+            fields = line.split()
+            if fields[1] == '1':
+                win1 = win1 + 1
+            elif fields[1] == '2':
+                win2 = win2 + 1
+            print("{0}-{1}".format(win1, win2))
+        else:
+            break
+    return win1, win2
+
 def train(N):
     root_path = str.format('../{0}x{0}/', N)
 
-    play_cmd = root_path + 'go_zero'
+    play_cmd = '../bin/go_zero'
     model_path = root_path + 'models/'
     data_path = root_path + "data/"
 
-    mini_batch_size = 512
+    mini_batch_size = config.mini_batch_size
     dm=data_manager(data_path)
     #training_data = dm.load_data2(10)
     channels = 17
 
-    batch_size = 10
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.15)
+    batch_size = config.self_play_file_batch_size
+    gpu_options = tf.GPUOptions()
+    gpu_options.allow_growth = True
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
-    #with tf.Session() as sess:
-        #files = os.listdir("./log/")
-        #for file in files:
-        #    if file.startswith("events") and file.endswith(".local"):
-        #        os.remove(os.path.join("./log/", file))
         best_network = Network("best_network", sess, N, channels)
         training_network = Network("training_network", sess, N, channels, True, "./log/")
 
@@ -161,8 +177,8 @@ def train(N):
         # restore from previous checkpoint
         last_model, generation = get_last_model(model_path)
         if last_model != "":
-            #training_network.restore_model('./model/')
-            tf.saved_model.loader.load(sess, ['SERVING'], last_model)
+            training_network.restore_model('./checkpoints/')
+            #tf.saved_model.loader.load(sess, ['SERVING'], last_model)
         else:
             #code below is to create an initial model
             print("no model was found. create an initial model")
@@ -178,14 +194,14 @@ def train(N):
 
         reps = 0
         while True:
-            file_list, training_data = dm.load_data2(batch_size, generation)
+            file_list, training_data = dm.load_data2(batch_size, generation, N)
             while training_data is None:
                 import time
-                print("not enough training data. sleep...30s")
-                time.sleep(30)
-                file_list, training_data = dm.load_data2(batch_size, generation)
+                print("not enough training data. sleep...")
+                time.sleep(config.sleep_seconds)
+                file_list, training_data = dm.load_data2(batch_size, generation, N)
 
-            for _ in range(len(training_data)//mini_batch_size):
+            for _ in range(len(training_data)//mini_batch_size//batch_size):
                 mini_batch = []
                 for _ in range(mini_batch_size):
                     position = random.randint(0, len(training_data)-1)
@@ -232,7 +248,7 @@ def train(N):
                 global_step, summary, _, entropy, value_loss = sess.run([training_network.global_step, training_network.summary_op, training_network.apply_gradients, training_network.actor_loss, training_network.value_loss], feed)
                 print(global_step, entropy, value_loss)
 
-            for i in range(2):
+            for i in range(config.self_play_file_increment):
                 base = os.path.splitext(file_list[i])[0]
                 os.rename(file_list[i], base+".done")
 
@@ -241,92 +257,41 @@ def train(N):
             #global_step = training_network.session.run(training_network.global_step)
             #training_network.summary_writer.add_summary(summary, global_step)
 
-            if reps > 0 and reps % 10 == 0:
+            if reps > 0 and reps % config.training_repetition == 0:
                 print("saving checkpoint...")
+                filename = training_network.save_model("./checkpoints/training.ckpt")
+
+                if os.path.exists(model_path+'temp/'):
+                    import shutil
+                    shutil.rmtree(model_path+'temp/')
+
                 builder = tf.saved_model.builder.SavedModelBuilder(model_path+'temp/')
                 builder.add_meta_graph_and_variables(sess, ['SERVING'])
                 builder.save(as_text=False)
 
-                #from go_board import GoBoard
-                #selfplay_board = GoBoard()
-                #score = []
-                print("evaluating checkpoint. pass 1 ...")
-                old_win = 0
-                new_win = 0
-                from subprocess import check_output
-                out=check_output([play_cmd,
-                              '-m1', last_model.split('/')[-1],
-                              '-m2', 'temp',
-                              '-s',
-                              '-n', '50'
-                              ])
-                eval_result = [int(x.split()[1]) for x in out.decode('utf-8').splitlines() if 'winner' in x]
-                print(eval_result)
-                old_win, new_win = eval_result.count(1), eval_result.count(2)
+                import evaluate
+                print("evaluating checkpoint ...")
 
-                print("evaluating checkpoint. pass 2 ...")
-                out = check_output([play_cmd,
-                                    '-m1', 'temp',
-                                    '-m2', last_model.split('/')[-1],
-                                    '-s',
-                                    '-n', '50'
-                                    ])
-                eval_result = [int(x.split()[1]) for x in out.decode('utf-8').splitlines() if 'winner' in x]
-                print(eval_result)
-                old_win = old_win + eval_result.count(2)
-                new_win = new_win + eval_result.count(1)  #for games_played in range(10):
-                #    result = selfplay_board.run(human=0, verbose=False, time=0.1, network=best_network, network2=training_network)
-                #    score.append(result)
-                #    print("games #{0} - {1} - {2} {3} {4}".format(games_played+1, result, score.count(1), score.count(2), score.count(0)))
-                #old_win = score.count(1)
-                #new_win = score.count(2)
+                evaluate.play_cmd = play_cmd
+                evaluate.model1 = last_model.split('/')[-1]
+                evaluate.model2 = 'temp'
 
-                #score = []
-                #for games_played in range(10):
-                #    result = selfplay_board.run(human=0, verbose=False, time=0.1, network=training_network, network2=best_network)
-                #    score.append(result)
-                #    print("games #{0} - {1} - {2} {3} {4}".format(games_played+1, result, score.count(1), score.count(2), score.count(0)))
-
-                #old_win = old_win + score.count(2)
-                #new_win = new_win + score.count(1)
-
-                if old_win == 0 or new_win/old_win > 1.05:
+                old_win, new_win = evaluate.evaluator(4, config.number_eval_games)
+                if new_win >= config.number_eval_games * 0.55:
                     generation = generation + 1
                     os.rename(model_path+'temp', model_path+'metagraph-'+str(generation).zfill(8))
-                    filename = training_network.save_model("./model/training.ckpt")
-
                     last_model, generation = get_last_model(model_path)
                     print("checkpoint is better. saved to " + 'metagraph-'+str(generation).zfill(8))
                     sess.run([training_to_best_op])
                 else:
-                    import shutil
                     shutil.rmtree(model_path+'temp/')
                     print("checkpoint is discarded")
 
-                    #best_to_training_op = copy_src_to_dst("best_network", "training_network")
-                    #sess.run([best_to_training_op])
-
-                #evaluate the current best network with the trained network
-
-            #refresh training data if there is any from self play
-            #training_data = dm.load_data2(batch_size)
-            #if training_data is None:
-            #    filename = training_network.save_model("./model/training.ckpt")
-            #    print("new model saved " + filename)
-
-            #while training_data is None:
-            #    import time
-            #    print("not enough training data. sleep...30s")
-            #    time.sleep(30)
-            #    training_data = dm.load_data2(batch_size)
-
-            #print("EPISODE #{0} - {1}, {2}".format(global_step, entropy, value_loss))
-            #reps += 1
 
 if __name__ == "__main__":
     import sys
 
-    n = 5
+    n = 19
     if len(sys.argv) == 2:
         n = int(sys.argv[1])
     train(n)

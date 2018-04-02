@@ -30,16 +30,16 @@ class Network(object):
             #resnet = tf.reshape(self.states, [-1, N, N, channels])
             if N==5:
                 cnnoutput = 32
-                layers = 2
+                num_blocks = 2
             elif N==9:
                 cnnoutput = 64
-                layers = 3
+                num_blocks = 3
             elif N==13:
                 cnnoutput = 128
-                layers = 5
+                num_blocks = 5
             elif N==19:
-                cnnoutput = 256
-                layers = 9
+                cnnoutput = 32
+                num_blocks = 2
             else:
                 raise Exception("undefined board size")
             #resnet = tf.transpose(self.states, [0, 2, 3, 1])
@@ -55,7 +55,7 @@ class Network(object):
 
             #padbegin = (cnnoutput - channels) // 2
             #resnet = tf.pad(resnet, [[0, 0], [0, 0], [0, 0], [padbegin, cnnoutput-channels-padbegin]])
-            for block in range(4 if N==5 else 6):
+            for block in range(num_blocks):
                 input = resnet
                 with tf.variable_scope("res_block_{0}".format(block)):
                     resnet = tf.layers.conv2d(input,
