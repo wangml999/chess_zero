@@ -31,26 +31,13 @@ SOFTWARE.*/
 #include <array>
 #include <unordered_set>
 #include <algorithm>
+#include "config.h"
 
 #define WHITE '2'
 #define BLACK '1'
 #define EMPTY '0'
 
 #define NONE -1
-
-#ifndef WN
-    #define WN 5
-#endif
-
-#if WN==19
-    #define KOMI 7.5
-#elif WN==13
-    #define KOMI 5.5
-#elif WN==9
-    #define KOMI 5.5
-#else
-    #define KOMI 0.0
-#endif
 
 #define NN WN*WN
 

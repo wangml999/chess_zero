@@ -139,7 +139,7 @@ int gtp_to_int(string str)
         n = NN;
     else
     {
-        if(str.length() == 2)
+        if(str.length() == 2 || str.length() == 3)
         {
             int row, col;
             col = (str[0] - 'A');
@@ -147,7 +147,7 @@ int gtp_to_int(string str)
                 col--;
             if(col >= 0 && col < WN)
             {
-                row = str[1] - '1';
+		row = atoi(str.substr(1, str.length()-1).c_str()) - 1;
                 if(row >= 0 && row < WN)
                 {
                     row = WN - row - 1;
@@ -231,7 +231,7 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
         
         int n;
         if(current_tree != nullptr)
-            n = current_tree->search(board, item.probs, value, 1600);
+            n = current_tree->search(board, item.probs, value, MCTS_REPS);
         else
         {
             vector<int> available_actions;

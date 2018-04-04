@@ -43,19 +43,6 @@ SOFTWARE.*/
 using namespace std;
 using namespace tensorflow;
 
-#define CPUCT 0.9
-#define VIRTUAL_LOSS  10
-
-#if WN==5
-    #define TENSORFLOW_BATCH_SIZE 8
-#elif WN==9
-    #define TENSORFLOW_BATCH_SIZE 8
-#elif WN==13
-    #define TENSORFLOW_BATCH_SIZE 8
-#elif WN==19
-    #define TENSORFLOW_BATCH_SIZE 16
-#endif
-
 class dihedral_method
 {
 public:
@@ -397,18 +384,19 @@ public:
     void expand(vector<TreeNode*>& leaves, vector<float>& values)
     {
         int method = generator() % 8;
-        Tensor states = MakeTensor(leaves, method);
+        Tensor* p_states = MakeTensor(leaves, method);
         
         std::vector<std::array<float, NN+1>> tmpprob_vector;
         values.clear();
         
     //auto game_start = std::chrono::high_resolution_clock::now();
-	//for(int i=0; i<100; i++)
-        pNetwork->Forward(states, tmpprob_vector, values);
+	//for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
+        pNetwork->Forward(*p_states, tmpprob_vector, values);
+	delete p_states;
     //auto game_end = std::chrono::high_resolution_clock::now();
     //auto diff = game_end-game_start;
     //std::chrono::nanoseconds game_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diff);
-    //std::cout << "100x forward time: " << game_ns.count()*1.0/1000000000 << " seconds" << std::endl;
+    //std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x forward time: " << game_ns.count()*1.0/1000000000 << " seconds" << std::endl;
 
         //pNetwork->Forward_Simulator(states, tmpprob_vector, values);
      
@@ -488,14 +476,14 @@ public:
         
         float total_visits_sqrt = sqrt(parent->visits);
         array<float, NN+1> uct;
-        if (parent->parent == nullptr)
+        /*if (parent->parent == nullptr)
         {
             vector<float> dir(NN+1);
             dirichlet(dir);
             for(int i=0; i<NN+1; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, dir[i], 0.25);
         }
-        else
+        else*/
         {
             for(int i=0; i<NN+1; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt);
@@ -511,12 +499,12 @@ public:
         return action;
     }
     
-    Tensor MakeTensor(vector<TreeNode*>& nodes, int method)
+    Tensor* MakeTensor(vector<TreeNode*>& nodes, int method)
     {
         assert(nodes.size() > 0);
         int batch_size = nodes.size();
-        Tensor states(DT_FLOAT, TensorShape({batch_size, (SLICES+1)*2+1, WN, WN}));
-        float* ptensor_data = states.flat<float>().data();
+        Tensor* p_states = new Tensor(DT_FLOAT, TensorShape({batch_size, (SLICES+1)*2+1, WN, WN}));
+        float* ptensor_data = p_states->flat<float>().data();
         
         for(int b=0; b<batch_size; b++)
         {
@@ -560,7 +548,7 @@ public:
                 }
         }
         
-        return states;
+        return p_states;
     }
     
 };
