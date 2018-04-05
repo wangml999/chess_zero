@@ -9,9 +9,6 @@ input_shape = [3, 3, 3]
     opponent's positions
     current colour: 0 white 1 black
 """
-cnnoutput = 0
-num_blocks = 0
-
 class Network(object):
     def __init__(self, name, sess, N, channels, training=False, logdir=None):
         self.session = sess
@@ -35,8 +32,8 @@ class Network(object):
                 raise Exception("undefined board size")
 
             try:
-                cnnoutput == config.network_settings[N]['cnnoutput']
-                num_blocks == config.network_settings[N]['num_blocks']
+                cnnoutput = config.network_settings[N]['cnnoutput']
+                num_blocks = config.network_settings[N]['num_blocks']
             except:
                 raise Exception("undefined cnn filters or number of blocks")
 
