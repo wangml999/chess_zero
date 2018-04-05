@@ -384,21 +384,35 @@ public:
     void expand(vector<TreeNode*>& leaves, vector<float>& values)
     {
         int method = generator() % 8;
-        Tensor* p_states = MakeTensor(leaves, method);
-        
-        std::vector<std::array<float, NN+1>> tmpprob_vector;
-        values.clear();
-        
-    //auto game_start = std::chrono::high_resolution_clock::now();
-	//for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
-        pNetwork->Forward(*p_states, tmpprob_vector, values);
-	delete p_states;
-    //auto game_end = std::chrono::high_resolution_clock::now();
-    //auto diff = game_end-game_start;
-    //std::chrono::nanoseconds game_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diff);
-    //std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x forward time: " << game_ns.count()*1.0/1000000000 << " seconds" << std::endl;
+	Tensor* p_states = nullptr;
 
+#ifdef TENSORFLOW_BENCHMARK        
+	auto game_start1 = std::chrono::high_resolution_clock::now();
+	for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
+#endif
+            p_states = MakeTensor(leaves, method);
+
+#ifdef TENSORFLOW_BENCHMARK        
+    	auto game_end1 = std::chrono::high_resolution_clock::now();
+    	auto diff1 = game_end1-game_start1;
+    	std::chrono::nanoseconds game_ns1 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff1);
+    	std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x maketensor time: " << game_ns1.count()*1.0/1000000000 << " seconds" << std::endl;
+#endif
+        std::vector<std::array<float, NN+1>> tmpprob_vector;
+
+#ifdef TENSORFLOW_BENCHMARK        
+	auto game_start2 = std::chrono::high_resolution_clock::now();
+	for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
+#endif
+            pNetwork->Forward(*p_states, tmpprob_vector, values);
+#ifdef TENSORFLOW_BENCHMARK
+    	auto game_end2 = std::chrono::high_resolution_clock::now();
+    	auto diff2 = game_end2-game_start2;
+    	std::chrono::nanoseconds game_ns2 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff2);
+    	std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x forward time: " << game_ns2.count()*1.0/1000000000 << " seconds" << std::endl;
+#endif
         //pNetwork->Forward_Simulator(states, tmpprob_vector, values);
+	delete p_states;
      
         for(int node_id=0; node_id<leaves.size(); node_id++)
         {
@@ -476,14 +490,16 @@ public:
         
         float total_visits_sqrt = sqrt(parent->visits);
         array<float, NN+1> uct;
-        /*if (parent->parent == nullptr)
+#ifdef ADD_DIRICHLET_NOISE
+        if (parent->parent == nullptr)
         {
             vector<float> dir(NN+1);
             dirichlet(dir);
             for(int i=0; i<NN+1; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, dir[i], 0.25);
         }
-        else*/
+        else
+#endif
         {
             for(int i=0; i<NN+1; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt);
@@ -516,22 +532,27 @@ public:
             {
                 std::string state;
                 
+                float* pdata1 = ptensor_data + b * ((SLICES+1)*2+1) * NN + slice * NN;
+                float* pdata2 = ptensor_data + b * ((SLICES+1)*2+1) * NN + (slice+1) * NN;
                 if( p!=nullptr )
                 {
                     state = p->pos.get_board();
-                    state = transform_state(state, method);
+                    for(int i=0; i<NN; i++)
+                    {
+		        char c = state[dihedral.data[method][i]];	
+                        *pdata1++ = (c == current);
+                        *pdata2++ = (c == opponent);
+                    }
                 }
                 else
-                    state = std::string(NN, EMPTY);
+		{
+                    for(int i=0; i<NN; i++)
+                    {
+                        *pdata1++ = 0;
+                        *pdata2++ = 0;
+		    }
+		}
                 
-                float* pdata1 = ptensor_data + b * ((SLICES+1)*2+1) * NN + slice * NN;
-                float* pdata2 = ptensor_data + b * ((SLICES+1)*2+1) * NN + (slice+1) * NN;
-                
-                for(int i=0; i<state.length(); i++)
-                {
-                    *pdata1++ = (state[i] == current);
-                    *pdata2++ = (state[i] == opponent);
-                }
                 
                 if(p != root && p != nullptr)
                     p = p->parent;
@@ -539,13 +560,12 @@ public:
                     p = nullptr;
             }
             
-            float* pdata = ptensor_data + b * ((SLICES+1)*2+1) * NN + (SLICES+1)*2 * NN;
             //last slice is the color of current player. 1 black or 0 white
-            for(int row=0; row<WN; row++)
-                for(int col=0; col<WN; col++)
-                {
-                    *pdata++ = (current == BLACK);
-                }
+            float* pdata = ptensor_data + b * ((SLICES+1)*2+1) * NN + (SLICES+1)*2 * NN;
+            for(int i=0; i<NN; i++)
+            {
+                *pdata++ = (current == BLACK);
+            }
         }
         
         return p_states;

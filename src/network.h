@@ -79,7 +79,6 @@ public:
     
     bool Forward(Tensor& states, std::vector<std::array<float, NN+1>>& action_probs_vector, std::vector<float>& values)
     {
-        
         if(!model_loaded)
             return false;
         
@@ -97,6 +96,8 @@ public:
             return 1;
         }
         
+	action_probs_vector.clear();
+	values.clear();
         auto probs_mapped = outputs[0].tensor<float,2>();
         for(int c=0; c<states.dim_size(0); c++)
         {
