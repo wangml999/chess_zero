@@ -6,4 +6,24 @@ mini_batch_size = 500
 number_eval_games = 400
 
 
+network_settings = {
+    5 : {
+        'cnnoutput' : 32,
+        'num_blocks' : 2
+    },
 
+    9: {
+        'cnnoutput': 64,
+        'num_blocks': 3
+    },
+
+    13: {
+        'cnnoutput': 128,
+        'num_blocks': 3
+    },
+
+    19: {
+        'cnnoutput': 256,
+        'num_blocks': 3
+    }
+}

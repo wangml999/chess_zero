@@ -1,7 +1,7 @@
 import tensorflow as tf
 import random
 import numpy as np
-
+import config
 """
 input_shape = [3, 3, 3]
  stack of 3 images
@@ -9,6 +9,9 @@ input_shape = [3, 3, 3]
     opponent's positions
     current colour: 0 white 1 black
 """
+cnnoutput = 0
+num_blocks = 0
+
 class Network(object):
     def __init__(self, name, sess, N, channels, training=False, logdir=None):
         self.session = sess
@@ -28,20 +31,15 @@ class Network(object):
             #resnet = tf.reshape(self.states, [-1, N * N, 2+1, 1])
             #resnet = tf.reshape(self.states, [-1, N, N, 3])
             #resnet = tf.reshape(self.states, [-1, N, N, channels])
-            if N==5:
-                cnnoutput = 32
-                num_blocks = 2
-            elif N==9:
-                cnnoutput = 64
-                num_blocks = 3
-            elif N==13:
-                cnnoutput = 128
-                num_blocks = 5
-            elif N==19:
-                cnnoutput = 32
-                num_blocks = 2
-            else:
+            if N == 0:
                 raise Exception("undefined board size")
+
+            try:
+                cnnoutput == config.network_settings[N]['cnnoutput']
+                num_blocks == config.network_settings[N]['num_blocks']
+            except:
+                raise Exception("undefined cnn filters or number of blocks")
+
             #resnet = tf.transpose(self.states, [0, 2, 3, 1])
             #resnet = tf.layers.conv2d(resnet, filters=cnnoutput, kernel_size=(1,1), name="id")
             resnet = tf.layers.conv2d(self.states,
