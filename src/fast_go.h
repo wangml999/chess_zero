@@ -182,7 +182,7 @@ public:
         //check all opponent neighbours to see if they were captured.
         for(it=opp_stones.begin(); it!=opp_stones.end(); ++it)
         {
-            std::unordered_set<int> captured;
+            std::vector<int> captured;
             new_board = maybe_capture_stones(new_board, *it, captured);
             
             //if captured more than 1, we don't care. we only need to keep the first capture which is ko if there is only one
@@ -193,7 +193,7 @@ public:
         //check all my neighbours to see if they were captured.
         for(it=my_stones.begin(); it!=my_stones.end(); ++it)
         {
-            std::unordered_set<int> captured;
+            std::vector<int> captured;
             new_board = maybe_capture_stones(new_board, *it, captured);
         }
 
@@ -219,7 +219,7 @@ public:
             {
                 int fempty = i;
                 
-                std::unordered_set<int> empties, borders;
+                std::vector<int> empties, borders;
                 find_reached(board, fempty, empties, borders);
                 
                 char possible_border_color = board[*borders.begin()];
@@ -335,31 +335,47 @@ private:
 
     //chain is the area that fc belongs to
     //reached is the contour that surround the area
-    void find_reached(std::string board, int fc, std::unordered_set<int>& chain, std::unordered_set<int>& reached)
+    void find_reached(std::string board, int fc, std::vector<int>& chain, std::vector<int>& reached)
     {
         char color = board[fc];
         int frontier[NN];
         int frontier_count = 0;
         
         frontier[frontier_count++] = fc;
-        
+
         while (frontier_count>0)
         {
-            int current_fc = frontier[--frontier_count];
-            
-            chain.insert(current_fc);
+            int current_fc = frontier[--frontier_count]; //pop up stack
+
+            board[current_fc] = '#'; //hash # is own's stones
+            //chain.insert(current_fc);
             
             neighbor_count = get_valid_neighbors(current_fc, neighbors);
             for (int i = 0; i < neighbor_count; ++i)
             {
                 int nfc = neighbors[i];
-                if (board[nfc] == color && chain.find(nfc)==chain.end())
-                    frontier[frontier_count++] = nfc;
-                else if (board[nfc] != color)
-                    reached.insert(nfc);
+                if (board[nfc] == color )//&& chain.find(nfc)==chain.end())
+                {
+                    frontier[frontier_count++] = nfc;  //push into stack
+                    board[nfc] = '#';
+                }
+                else if (board[nfc] != '*' && board[nfc] != '#')
+                {
+                    //reached.insert(nfc);
+                    board[nfc] = '*';
+                }
             }
         }
         
+        chain.clear();
+        reached.clear();
+        for(int i=0; i<NN; i++)
+        {
+            if(board[i] == '#')
+                chain.push_back(i);
+            else if(board[i] == '*')
+                reached.push_back(i);
+        }
         return;
     }
 
@@ -369,7 +385,7 @@ private:
         return board;
     }
 
-    std::string bulk_place_stones(char color, std::string board, std::unordered_set<int> stones)
+    std::string bulk_place_stones(char color, std::string board, std::vector<int>& stones)
     {
         std::for_each(stones.begin(), stones.end(), [&](int i){
             board[i] = color;
@@ -378,9 +394,9 @@ private:
         return board;
     }
 
-    std::string maybe_capture_stones(std::string board, int fc, std::unordered_set<int>& chain)
+    std::string maybe_capture_stones(std::string board, int fc, std::vector<int>& chain)
     {
-        std::unordered_set<int> reached;
+        std::vector<int> reached;
         
         find_reached(board, fc, chain, reached);
         
