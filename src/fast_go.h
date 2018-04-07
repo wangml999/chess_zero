@@ -399,16 +399,17 @@ private:
     std::string maybe_capture_stones(std::string& board, int fc, std::vector<int>& chain)
     {
         std::vector<int> reached;
-        std::string new_board;
         
         find_reached(board, fc, chain, reached);
         
         //if all stones reached are not empty meaning no qi existing, remove the area from the board
         if( std::all_of(reached.begin(), reached.end(), [&](int fc){return board[fc] != EMPTY;}) )
-            new_board = bulk_place_stones(EMPTY, board, chain);
+            return bulk_place_stones(EMPTY, board, chain);
         else
+	{
             chain.clear();
-        return new_board;
+            return board;
+        }
     }
 
     //if is ko, return true and surrounding color
