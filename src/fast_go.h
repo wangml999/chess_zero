@@ -128,19 +128,21 @@ public:
         char color = board[fc];
         frontier[frontier_count++] = fc;
         
-        std::unordered_set<int> chain;
         while (frontier_count>0)
         {
             int current_fc = frontier[--frontier_count];
             
-            chain.insert(current_fc);
+            board[current_fc] = '#';
             
             neighbor_count = get_valid_neighbors(current_fc, neighbors);
             for (int i = 0; i < neighbor_count; ++i)
             {
                 int nfc = neighbors[i];
-                if (board[nfc] == color && chain.find(nfc)==chain.end())
+                if (board[nfc] == color)
+                {
                     frontier[frontier_count++] = nfc;
+                    board[nfc] = '#';
+                }
                 else if (board[nfc] == EMPTY)
                     return true;
             }
