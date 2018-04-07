@@ -12,22 +12,16 @@ input_shape = [3, 3, 3]
 class Network(object):
     def __init__(self, name, sess, N, channels, training=False, logdir=None):
         self.session = sess
-        #self.increase_global_step = self.global_step.assign_add(1)
 
         output_dim = N*N+1
 
         with tf.variable_scope(name):
-            #self.init_all_vars_op = tf.variables_initializer(tf.global_variables(), name='init_all_vars_op')
-
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
             self.states = tf.placeholder(tf.float32, shape=[None, channels, N, N], name="states")
             self.actions_pi = tf.placeholder(tf.float32, shape=[None, N*N+1], name="actions_pi")
             self.rewards = tf.placeholder(tf.float32, shape=[None, 1], name="rewards")
 
-            #resnet = tf.reshape(self.states, [-1, N * N, 2+1, 1])
-            #resnet = tf.reshape(self.states, [-1, N, N, 3])
-            #resnet = tf.reshape(self.states, [-1, N, N, channels])
             if N == 0:
                 raise Exception("undefined board size")
 
@@ -37,16 +31,18 @@ class Network(object):
             except:
                 raise Exception("undefined cnn filters or number of blocks")
 
-            #resnet = tf.transpose(self.states, [0, 2, 3, 1])
+            states = tf.cast(self.states, tf.float16)
+            #resnet = tf.transpose(states, [0, 2, 3, 1])
             #resnet = tf.layers.conv2d(resnet, filters=cnnoutput, kernel_size=(1,1), name="id")
-            resnet = tf.layers.conv2d(self.states,
+            resnet = tf.layers.conv2d(states,
                                       filters=cnnoutput,
-                                      kernel_size=(3, 3),
+                                      kernel_size=(1, 1),
                                       strides=(1, 1),
                                       name="pre_conv",
-                                      padding="same")
-            resnet = tf.layers.batch_normalization(resnet, name="pre_bn1")
-            resnet = tf.nn.relu(resnet, name="pre_relu")
+                                      padding="same"
+                                      )
+            #resnet = tf.layers.batch_normalization(resnet, name="pre_bn1", fused=True)
+            #resnet = tf.nn.relu(resnet, name="pre_relu")
 
             #padbegin = (cnnoutput - channels) // 2
             #resnet = tf.pad(resnet, [[0, 0], [0, 0], [0, 0], [padbegin, cnnoutput-channels-padbegin]])
@@ -59,7 +55,7 @@ class Network(object):
                                            strides=(1, 1),
                                            name="conv1",
                                            padding="same")
-                    resnet = tf.layers.batch_normalization(resnet, name="bn1")
+                    resnet = tf.layers.batch_normalization(resnet, name="bn1", fused=True)
                     resnet = tf.nn.relu(resnet, name="relu1")
 
                     resnet = tf.layers.conv2d(resnet,
@@ -68,7 +64,7 @@ class Network(object):
                                            strides=(1, 1),
                                            name="conv2",
                                            padding="same")
-                    resnet = tf.layers.batch_normalization(resnet, name="bn2")
+                    resnet = tf.layers.batch_normalization(resnet, name="bn2", fused=True)
                     resnet = tf.add(resnet, input)
                     resnet = tf.nn.relu(resnet, name="relu2")
 
@@ -79,13 +75,14 @@ class Network(object):
                                        strides=(1, 1),
                                        name="conv",
                                        padding="same")
-                policy_net = tf.layers.batch_normalization(policy_net, name="bn")
+                policy_net = tf.layers.batch_normalization(policy_net, name="bn", fused=True)
                 policy_net = tf.nn.relu(policy_net, name="relu")
                 policy_net = tf.contrib.layers.flatten(policy_net)
                 actions = tf.layers.dense(policy_net, output_dim, name='dense')
                 # actor network
                 prior_p = tf.nn.softmax(actions, name="softmax")
-                self.action_prob = tf.clip_by_value(prior_p, 1e-7, 1 - 1e-7, name="out_action_prob")
+                action_prob = tf.clip_by_value(prior_p, 1e-4, 1 - 1e-4)
+                self.action_prob = tf.cast(action_prob, tf.float32, name="out_action_prob")
 
             with tf.variable_scope("value_head"):
                 value_net = tf.layers.conv2d(resnet,
@@ -94,14 +91,15 @@ class Network(object):
                                        strides=(1, 1),
                                        name="conv",
                                        padding="same")
-                value_net = tf.layers.batch_normalization(value_net, name="bn")
+                value_net = tf.layers.batch_normalization(value_net, name="bn", fused=True)
                 value_net = tf.nn.relu(value_net, name="relu1")
 
                 value_net = tf.contrib.layers.flatten(value_net)
                 value_net = tf.layers.dense(value_net, 256, name='hidden')
                 value_net = tf.nn.relu(value_net, name="relu2")
                 value_net = tf.layers.dense(value_net, 1)
-                self.value = tf.tanh(value_net, name="out_value")
+                value_net = tf.tanh(value_net)
+                self.value = tf.cast(value_net, tf.float32, name="out_value")
 
             if training:
                 with tf.variable_scope("entropy_loss"):
