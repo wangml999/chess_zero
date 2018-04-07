@@ -39,6 +39,7 @@ SOFTWARE.*/
 #include "network.h"
 #include <tensorflow/cc/saved_model/loader.h>
 #include <iomanip>
+#include <thread>
 
 using namespace std;
 using namespace tensorflow;
@@ -522,52 +523,57 @@ public:
         Tensor* p_states = new Tensor(DT_FLOAT, TensorShape({batch_size, (SLICES+1)*2+1, WN, WN}));
         float* ptensor_data = p_states->flat<float>().data();
         
+        std::thread t[TENSORFLOW_BATCH_SIZE];
+        
         for(int b=0; b<batch_size; b++)
         {
-            TreeNode *p = nodes[b];
-            char current = p->player;
-            char opponent = p->pos.swap_colors(current);
-            
-            for(int slice=0; slice<(SLICES+1)*2; slice+=2)
-            {
-                std::string state;
+            t[b] = std::thread([=](){
+                thread_local TreeNode *p = nodes[b];
+                char current = p->player;
+                char opponent = p->pos.swap_colors(current);
                 
-                float* pdata1 = ptensor_data + b * ((SLICES+1)*2+1) * NN + slice * NN;
-                float* pdata2 = ptensor_data + b * ((SLICES+1)*2+1) * NN + (slice+1) * NN;
-                if( p!=nullptr )
+                for(int slice=0; slice<(SLICES+1)*2; slice+=2)
                 {
-                    state = p->pos.get_board();
-                    for(int i=0; i<NN; i++)
+                    std::string state;
+                    
+                    float* pdata1 = ptensor_data + b * ((SLICES+1)*2+1) * NN + slice * NN;
+                    float* pdata2 = ptensor_data + b * ((SLICES+1)*2+1) * NN + (slice+1) * NN;
+                    if( p!=nullptr )
                     {
-		        char c = state[dihedral.data[method][i]];	
-                        *pdata1++ = (c == current);
-                        *pdata2++ = (c == opponent);
+                        state = p->pos.get_board();
+                        for(int i=0; i<NN; i++)
+                        {
+                            char c = state[dihedral.data[method][i]];
+                            *pdata1++ = (c == current);
+                            *pdata2++ = (c == opponent);
+                        }
                     }
-                }
-                else
-		{
-                    for(int i=0; i<NN; i++)
+                    else
                     {
-                        *pdata1++ = 0;
-                        *pdata2++ = 0;
-		    }
-		}
+                        for(int i=0; i<NN; i++)
+                        {
+                            *pdata1++ = 0;
+                            *pdata2++ = 0;
+                        }
+                    }
+                    
+                    if(p != root && p != nullptr)
+                        p = p->parent;
+                    else
+                        p = nullptr;
+                }
                 
-                
-                if(p != root && p != nullptr)
-                    p = p->parent;
-                else
-                    p = nullptr;
-            }
-            
-            //last slice is the color of current player. 1 black or 0 white
-            float* pdata = ptensor_data + b * ((SLICES+1)*2+1) * NN + (SLICES+1)*2 * NN;
-            for(int i=0; i<NN; i++)
-            {
-                *pdata++ = (current == BLACK);
-            }
+                //last slice is the color of current player. 1 black or 0 white
+                float* pdata = ptensor_data + b * ((SLICES+1)*2+1) * NN + (SLICES+1)*2 * NN;
+                for(int i=0; i<NN; i++)
+                {
+                    *pdata++ = (current == BLACK);
+                }
+            });
         }
         
+        for(int b=0; b<batch_size; b++)
+            t[b].join();
         return p_states;
     }
     
