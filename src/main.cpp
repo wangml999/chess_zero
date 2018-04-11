@@ -493,7 +493,7 @@ int main(int argc, const char * argv[])
                     {
                         output_file << step.state << "," << step.action << ",";
                         for(auto& p : step.probs)
-                            output_file << std::fixed << std::setprecision(2) << p << ",";
+                            output_file << std::fixed << std::setprecision(2) << p * 100 << ",";
                         output_file << step.reward << "\n";
                     }
                 }
