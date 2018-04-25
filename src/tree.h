@@ -185,7 +185,7 @@ public:
             TEMPERATURE(temp),
             resign_threshold(re_th),
             resign_prob(re_pro),
-	    gamma_dist(0.03)
+	    gamma_dist(ALPHA)
     {
         root = new TreeNode();
         pNetwork = nullptr;
@@ -283,7 +283,7 @@ public:
         }
 
         int n;
-        if(TEMPERATURE > 0.1)
+        if(TEMPERATURE > 0.1 && root->level < int(0.1*NN))
         {
             std::discrete_distribution<int> distribution(search_probs.begin(), search_probs.end());
             n = distribution(generator);

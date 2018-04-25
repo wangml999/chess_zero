@@ -22,6 +22,8 @@
 #define CPUCT 0.9
 #define VIRTUAL_LOSS  10
 
+#define ADD_DIRICHLET_NOISE
+#define ALPHA 0.3
 //#define TENSORFLOW_BENCHMARK
 
 #endif
