@@ -173,6 +173,7 @@ private:
     float resign_threshold;
     float resign_prob;
     std::gamma_distribution<float> gamma_dist;
+    vector<float> dirichlet_noise; 
     
     //atomic<int> count;
 public:
@@ -185,7 +186,8 @@ public:
             TEMPERATURE(temp),
             resign_threshold(re_th),
             resign_prob(re_pro),
-	    gamma_dist(ALPHA)
+	    gamma_dist(ALPHA),
+	    dirichlet_noise(NN+1)	
     {
         root = new TreeNode();
         pNetwork = nullptr;
@@ -242,6 +244,7 @@ public:
             this->root->update(1, v);
         }
 
+        dirichlet(dirichlet_noise);
         expand_buffer.clear();
         for(int i=0; i<rep; i++)
         {
@@ -494,10 +497,8 @@ public:
 #ifdef ADD_DIRICHLET_NOISE
         if (parent->parent == nullptr)
         {
-            vector<float> dir(NN+1);
-            dirichlet(dir);
             for(int i=0; i<NN+1; i++)
-                uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, dir[i], 0.25);
+                uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, dirichlet_noise[i], 0.25);
         }
         else
 #endif
