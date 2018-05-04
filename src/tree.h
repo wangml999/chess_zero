@@ -275,9 +275,11 @@ public:
         }
 
         float sum = 0.0;
+	std::array<float, NN+1> values;
         for(int i=0; i<NN+1; i++)
         {
             search_probs[i] = root->children[i].visits;
+	    values[i] = -root->children[i].mean_value;	
             sum += search_probs[i];
         }
         for(int i=0; i<NN+1; i++)
@@ -495,7 +497,7 @@ public:
         float total_visits_sqrt = sqrt(parent->visits);
         array<float, NN+1> uct;
 #ifdef ADD_DIRICHLET_NOISE
-        if (parent->parent == nullptr)
+        if (parent->parent == nullptr && TEMPERATURE > 0.1)
         {
             for(int i=0; i<NN+1; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, dirichlet_noise[i], 0.25);
