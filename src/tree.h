@@ -389,14 +389,17 @@ public:
     
     void expand(vector<TreeNode*>& leaves, vector<float>& values)
     {
-        int method = generator() % 8;
+	vector<int> methods;
+	std::uniform_int_distribution<int> distribution(0,7);
+        for(int node_id=0; node_id<leaves.size(); node_id++)
+            methods.push_back(distribution(generator));
 	Tensor* p_states = nullptr;
 
 #ifdef TENSORFLOW_BENCHMARK        
 	auto game_start1 = std::chrono::high_resolution_clock::now();
 	for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
 #endif
-            p_states = MakeTensor(leaves, method);
+            p_states = MakeTensor(leaves, methods);
 
 #ifdef TENSORFLOW_BENCHMARK        
     	auto game_end1 = std::chrono::high_resolution_clock::now();
@@ -435,6 +438,7 @@ public:
                     v = v / sum_of_probs;
                 });
 
+		int method = methods[node_id];
                 if (method != 0)
                 {
                     for(int i=0; i<NN; i++)
@@ -519,19 +523,20 @@ public:
         return action;
     }
     
-    Tensor* MakeTensor(vector<TreeNode*>& nodes, int method)
+    Tensor* MakeTensor(vector<TreeNode*>& nodes, vector<int>& methods)
     {
         assert(nodes.size() > 0);
         int batch_size = nodes.size();
         Tensor* p_states = new Tensor(DT_FLOAT, TensorShape({batch_size, (SLICES+1)*2+1, WN, WN}));
         float* ptensor_data = p_states->flat<float>().data();
         
-        std::thread t[TENSORFLOW_BATCH_SIZE];
+        //std::thread t[TENSORFLOW_BATCH_SIZE];
         
         for(int b=0; b<batch_size; b++)
         {
-            t[b] = std::thread([=](){
-                thread_local TreeNode *p = nodes[b];
+	    int method = methods[b];	
+            //t[b] = std::thread([=](){
+                /*thread_local*/ TreeNode *p = nodes[b];
                 char current = p->player;
                 char opponent = p->pos.swap_colors(current);
                 
@@ -572,11 +577,11 @@ public:
                 {
                     *pdata++ = (current == BLACK);
                 }
-            });
+            //});
         }
         
-        for(int b=0; b<batch_size; b++)
-            t[b].join();
+        //for(int b=0; b<batch_size; b++)
+            //t[b].join();
         return p_states;
     }
     
