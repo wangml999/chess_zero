@@ -182,7 +182,7 @@ string int_to_gtp(int n)
     return gtp;
 }
 
-void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool verbose=true)
+void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<logitem>& logs, bool verbose=true)
 {
     auto game_start = std::chrono::high_resolution_clock::now();
     Tree *pt1=nullptr, *pt2=nullptr;
@@ -191,13 +191,13 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(0.01, -0.9, 1.0);  //allow resign if value is less than -0.
+            pt1 = new Tree(0.01, -0.9, 1.0, rep1);  //allow resign if value is less than -0.
             pt1->pNetwork = pNetwork1;
         }
         
         if(pNetwork2!=nullptr)
         {
-            pt2 = new Tree(0.01, -0.9, 1.0);
+            pt2 = new Tree(0.01, -0.9, 1.0, rep2);
             pt2->pNetwork = pNetwork2;
         }
     }
@@ -205,7 +205,7 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(1.0, -2.0, 1.0);
+            pt1 = new Tree(1.0, -2.0, 1.0, rep1);
             pt1->pNetwork = pNetwork1;
         
             pt2 = pt1;
@@ -231,7 +231,7 @@ void play(Network* pNetwork1, Network* pNetwork2, vector<logitem>& logs, bool ve
         
         int n;
         if(current_tree != nullptr)
-            n = current_tree->search(board, item.probs, value, MCTS_REPS);
+            n = current_tree->search(board, item.probs, value);
         else
         {
             vector<int> available_actions;
@@ -336,6 +336,8 @@ int main(int argc, const char * argv[])
     string model_path = "";
     string data_path = "";
     int i = 0;
+    int rep1 = MCTS_REPS;
+    int rep2 = MCTS_REPS;
     while(i<argc)
     {
         if(string(argv[i]) == "-n")
@@ -347,10 +349,20 @@ int main(int argc, const char * argv[])
         {
            player1_model = string(argv[++i]);
         }
+        
+        if(string(argv[i]) == "-r1")
+        {
+           rep1 = atoi(argv[++i]);
+        }
 
         if(string(argv[i]) == "-m2")
         {
            player2_model = string(argv[++i]);
+        }
+
+        if(string(argv[i]) == "-r2")
+        {
+           rep2 = atoi(argv[++i]);
         }
         
         if(string(argv[i]) == "-s")  //silent
@@ -460,7 +472,7 @@ int main(int argc, const char * argv[])
         logs.clear();
         try
         {
-            play(pnetwork1, pnetwork2, logs, verbose);
+            play(pnetwork1, rep1, pnetwork2, rep2, logs, verbose);
         }
         catch(...)
         {

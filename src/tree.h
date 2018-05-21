@@ -174,20 +174,21 @@ private:
     float resign_prob;
     std::gamma_distribution<float> gamma_dist;
     vector<float> dirichlet_noise; 
-    
+    int mcts_reps;
     //atomic<int> count;
 public:
     TreeNode* root;
     Network* pNetwork;
     
-    Tree(float temp=1.0, float re_th=-0.9, float re_pro=0.9) :
+    Tree(float temp=1.0, float re_th=-0.9, float re_pro=0.9, int reps=MCTS_REPS) :
             dihedral(),
             generator(std::random_device{}()),
             TEMPERATURE(temp),
             resign_threshold(re_th),
             resign_prob(re_pro),
-	    gamma_dist(ALPHA),
-	    dirichlet_noise(NN+1)	
+            gamma_dist(ALPHA),
+            dirichlet_noise(NN+1),
+            mcts_reps(reps)
     {
         root = new TreeNode();
         pNetwork = nullptr;
@@ -233,7 +234,7 @@ public:
         root = newRoot;
     }
     
-    int search(Board& board, array<float, NN+1> &search_probs, float &value, int rep = 0)
+    int search(Board& board, array<float, NN+1> &search_probs, float &value)
     {
         this->root->pos = board.position;
         this->root->player = board.current;
@@ -246,10 +247,10 @@ public:
 
         dirichlet(dirichlet_noise);
         expand_buffer.clear();
-        for(int i=0; i<rep; i++)
+        for(int i=0; i<this->mcts_reps; i++)
         {
             simulate(board);
-            if( expand_buffer.size() == TENSORFLOW_BATCH_SIZE || i==(rep-1))
+            if( expand_buffer.size() == TENSORFLOW_BATCH_SIZE || i==(this->mcts_reps-1))
             {
                 if( expand_buffer.size() > 0)
                 {
@@ -275,11 +276,15 @@ public:
         }
 
         float sum = 0.0;
-	std::array<float, NN+1> values;
+        std::array<float, NN+1> values;
         for(int i=0; i<NN+1; i++)
         {
-            search_probs[i] = root->children[i].visits;
-	    values[i] = -root->children[i].mean_value;	
+            if(this->mcts_reps > 0)
+                search_probs[i] = root->children[i].visits;
+            else
+                search_probs[i] = root->children[i].prob;
+            
+            values[i] = -root->children[i].mean_value;
             sum += search_probs[i];
         }
         for(int i=0; i<NN+1; i++)
