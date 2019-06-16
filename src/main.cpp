@@ -103,6 +103,7 @@ struct logitem
     array<float, NN+1> probs;
     int action;
     float reward;
+    float value;
 };
 
 string get_last_model(string path)
@@ -221,8 +222,6 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
     opponent_tree = pt2;
     while((status=board.status())==-1)
     {
-        float value;
-
         auto t1 = std::chrono::high_resolution_clock::now();
         
         logitem item;
@@ -231,7 +230,7 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
         
         int n;
         if(current_tree != nullptr)
-            n = current_tree->search(board, item.probs, value);
+            n = current_tree->search(board, item.probs, item.value);
         else
         {
             vector<int> available_actions;
@@ -267,7 +266,7 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
             std::cout << int_to_gtp(n);
         
             //std::cout << ", score: " << board.score();
-            std::cout << ", value: " << value;
+            std::cout << ", value: " << item.value;
             std::cout << ", time: " << ns.count()*1.0/1000000000 << " seconds" << std::endl;
             board.display(n);
             /*if(n==NN)
@@ -331,6 +330,7 @@ int main(int argc, const char * argv[])
     unsigned int number_to_play = 1;
     string player1_model, player2_model;
     bool verbose = true;
+    bool save_games = false;
 
     string root_path = "";
     string model_path = "";
@@ -370,6 +370,11 @@ int main(int argc, const char * argv[])
            verbose = false;
         }
         
+        if(string(argv[i]) == "-save")  //save games
+        {
+           save_games = true;
+        }
+
         if(string(argv[i]) == "-md")
         {
             model_path = string(argv[i+1]);
@@ -480,10 +485,10 @@ int main(int argc, const char * argv[])
         }
         
         games_played++;
-        if(number_to_play == 0 && is_self_play)
+        if((number_to_play == 0 && is_self_play) || save_games)
         {
             games.push_back(logs);
-            if(games.size()==100)
+            if (games.size()==100 || (number_to_play !=0 && (number_to_play == games_played)))
             {
                 int generation = atoi(player1_model.substr(player1_model.size() - 8).c_str());
                 std::time_t now = std::time(NULL);
@@ -496,7 +501,7 @@ int main(int argc, const char * argv[])
                 //auto t1 = std::chrono::high_resolution_clock::now();
                 std::ofstream output_file;
                 ostringstream oss;
-                oss << "selfplay-" << std::setfill('0') << std::setw(8) << generation << "-" + string(buffer) + ".txt";
+                oss << "selfplay-" << std::setfill('0') << std::setw(8) << generation << "-" + string(buffer) << "-" << ::getpid() << ".txt";
 
                 output_file.open(data_path + oss.str());
                 for(auto& game : games)
@@ -506,13 +511,16 @@ int main(int argc, const char * argv[])
                         output_file << step.state << "," << step.action << ",";
                         for(auto& p : step.probs)
                             output_file << std::fixed << std::setprecision(2) << p * 100 << ",";
-                        output_file << step.reward << "\n";
+                        output_file << step.reward << "," << step.value << "\n";
                     }
                 }
                 output_file.close();
                 std::cout << "saved " << oss.str() << std::endl;
                 
                 games.clear();
+
+		if(number_to_play != 0)
+		    break;
                 //auto t2 = std::chrono::high_resolution_clock::now();
                 //auto diff = t2-t1;
                 //std::chrono::nanoseconds ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diff);
