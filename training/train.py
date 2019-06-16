@@ -10,6 +10,7 @@ import os
 import sys
 import config
 import shutil
+#from tensorflow.python import debug as tf_debug
 
 class data_manager:
     def __init__(self, path):
@@ -56,8 +57,19 @@ class data_manager:
         #return list(itertools.chain.from_iterable(data))
         return data
 
+    def sample(self, batch_size, generation, N):
+        import subprocess
+        play_cmd = '../bin/go_zero'
+        procs = []
+        print("sampling...")
+        for _ in range(batch_size):
+            proc = subprocess.Popen([play_cmd, '-m1', 'metagraph-'+format(generation, '08'), '-save', '-s', '-n', str(100)])
+            proc.wait()
+
+
     def load_data2(self, most_recent_games, generation, N):
         file_list = [file for file in glob.glob(self.path+"/"+"selfplay-*.txt")]
+        file_list.sort(key=os.path.basename)
         if len(file_list) < most_recent_games:
             return None, None
 
@@ -74,19 +86,16 @@ class data_manager:
                     state = mylist[0]
                     if state == '0'*(N*N):
                         current_player, opponent = 1, 2
-                    if len(mylist) == (N*N+1+3):
-                        player = current_player
-                        current_player, opponent = opponent, current_player
-                        action = int(mylist[1])
-                        probs = tuple([float(x) for x in mylist[2:-1]])
-                        reward = float(mylist[-1])
-                    else:
-                        player = int(mylist[1])
-                        action = int(mylist[2])
-                        probs = tuple([float(x) for x in mylist[3:-1]])
-                        reward = float(mylist[-1])
 
-                    data.append((state, player, action, probs, reward))
+                    player = current_player
+                    current_player, opponent = opponent, current_player
+                    action = int(mylist[1])
+                    probs = [float(x) for x in mylist[2:-2]]
+                    probs = tuple([x/sum(probs) for x in probs])
+                    reward = float(mylist[-2])
+                    oldvalue = float(mylist[-1])
+
+                    data.append((state, player, action, probs, reward, oldvalue))
             n+=1
 
             #if len(self.data) + len(data) > self.max_list_length:
@@ -166,11 +175,14 @@ def train(N):
     #training_data = dm.load_data2(10)
     channels = 17
 
+    from datetime import datetime
+    random.seed(datetime.now())
     batch_size = config.self_play_file_batch_size
     gpu_options = tf.GPUOptions()
     gpu_options.allow_growth = True
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
-        best_network = Network("best_network", sess, N, channels)
+        #sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
+        #best_network = Network("best_network", sess, N, channels)
         training_network = Network("training_network", sess, N, channels, True, "./log/")
 
         sess.run(training_network.init_all_vars_op)
@@ -187,105 +199,158 @@ def train(N):
             builder = tf.saved_model.builder.SavedModelBuilder(export_dir)
             builder.add_meta_graph_and_variables(sess, ['SERVING'])
             builder.save(as_text=False)
+            last_model, generation = get_last_model(model_path)
             #return
 
         #filename = training_network.save_model("./model/training.ckpt")
-        training_to_best_op = copy_src_to_dst("training_network", "best_network")
-        sess.run([training_to_best_op])
+        #training_to_best_op = copy_src_to_dst("training_network", "best_network")
+        #sess.run([training_to_best_op])
 
+        #trainables = tf.trainable_variables("training_network")
         reps = 0
-        while True:
+        nupdates = 500
+        lr = lambda f: f * 2.5e-4
+        cliprange = lambda f: f * 0.1
+        for update in range(1, nupdates+1):
+            # using current generation model to sample batch_size files. each file has 100 games
             file_list, training_data = dm.load_data2(batch_size, generation, N)
+            if training_data is None:
+                dm.sample(batch_size, generation, N)
+                file_list, training_data = dm.load_data2(batch_size, generation, N)
+
             while training_data is None:
                 import time
                 print("not enough training data. sleep...")
                 time.sleep(config.sleep_seconds)
                 file_list, training_data = dm.load_data2(batch_size, generation, N)
 
-            for _ in range(len(training_data)//mini_batch_size//batch_size):
-                mini_batch = []
-                for _ in range(mini_batch_size):
-                    position = random.randint(0, len(training_data)-1)
-                    items = []
-                    state, player, action, pi, value = training_data[position]
-                    while state != '0'*N*N and len(items) < 7:
+            frac = 1.0  - (update - 1.0) / nupdates
+            #frac = 1.0 * 0.996 ** (update - 1.0)
+            print("learning rate:{} Clip Range {}".format(lr(frac), cliprange(frac)))
+            inds = np.arange(len(training_data))
+            for _ in range(4):
+                # Randomize the indexes
+                np.random.shuffle(inds)
+                # 0 to batch_size with batch_train_size step
+                for start in range(0, len(training_data), mini_batch_size):
+                    end = start + mini_batch_size
+                    if end >= len(training_data) - 1:
+                        end = len(training_data) - 1
+                    mbinds = inds[start:end]
+                    if len(mbinds) < mini_batch_size / 2:
+                        break
+                    mini_batch = []
+                    for k in range(len(mbinds)):
+                        position = mbinds[k]
+                        items = []
+                        state, player, action, pi, reward, oldvalue = training_data[position]
+                        while state != '0'*N*N and len(items) < 7:
+                            items.append(training_data[position])
+                            position = position - 1
+                            state, player, action, pi, reward, oldvalue = training_data[position]
                         items.append(training_data[position])
-                        position = position - 1
-                        state, player, action, pi, value = training_data[position]
-                    items.append(training_data[position])
-                    mini_batch.append(items)
+                        mini_batch.append(items)
 
-                states = []
-                actions = []
-                rewards = []
+                    states = []
+                    actions = []
+                    actions_pi = []
+                    rewards = []
+                    old_values = []
 
-                for s in mini_batch:
-                    c = None
-                    _, player, action, pi, value = s[0]
-                    for x in s:
-                        state, _, _, _, _ = x
-                        a = np.array([int(ltr == str(player)) for i, ltr in enumerate(state)]).reshape((N, N))
-                        b = np.array([int(ltr == str(3-player)) for i, ltr in enumerate(state)]).reshape((N, N))
-                        if c is None:
-                            c = np.array([a, b])
-                        else:
-                            c = np.append(c, [np.array(a), np.array(b)], axis=0)
+                    for s in mini_batch:
+                        c = None
+                        _, player, action, pi, reward, oldvalue = s[0]
+                        #prevent policy becomes zero
+                        #pi = [p if p != 0 else 1e-5 for p in pi]
+                        for x in s:
+                            state, _, _, _, _, _ = x
+                            a = np.array([int(ltr == str(player)) for i, ltr in enumerate(state)]).reshape((N, N))
+                            b = np.array([int(ltr == str(3-player)) for i, ltr in enumerate(state)]).reshape((N, N))
+                            if c is None:
+                                c = np.array([a, b])
+                            else:
+                                c = np.append(c, [np.array(a), np.array(b)], axis=0)
 
-                    for i in range((channels - 1) // 2 - len(s)):
-                        c = np.append(c, [np.zeros([N, N]), np.zeros([N, N])], axis=0)
+                        for i in range((channels - 1) // 2 - len(s)):
+                            c = np.append(c, [np.zeros([N, N]), np.zeros([N, N])], axis=0)
 
-                    c = np.append(c, [np.full([N, N], player % 2, dtype=int)], axis=0)
+                        c = np.append(c, [np.full([N, N], player % 2, dtype=int)], axis=0)
 
-                    states.append(c)
-                    actions.append(pi)
-                    rewards.append(value)
+                        states.append(c)
+                        actions.append(action)
+                        actions_pi.append(pi)
+                        rewards.append(reward)
+                        old_values.append(oldvalue)
 
-                feed = {
-                    training_network.states: np.array(states),
-                    training_network.actions_pi: actions,
-                    training_network.rewards: np.vstack(rewards)
-                }
+                    feed = {
+                        training_network.states: np.array(states),
+                        training_network.actions: actions,
+                        training_network.actions_pi: actions_pi,
+                        training_network.rewards: np.vstack(rewards),
+                        training_network.old_values: np.vstack(old_values),
+                        training_network.learning_rate : lr(frac),
+                        training_network.clip_range: cliprange(frac),
+                    }
 
-                global_step, summary, _, entropy, value_loss = sess.run([training_network.global_step, training_network.summary_op, training_network.apply_gradients, training_network.actor_loss, training_network.value_loss], feed)
-                print(global_step, entropy, value_loss)
+                    global_step, summary, _, entropy, value_loss, l2_loss = sess.run([training_network.global_step, training_network.summary_op, training_network.apply_gradients, training_network.actor_loss, training_network.value_loss, training_network.l2_loss], feed)
+                    print(global_step, entropy, value_loss, l2_loss)
 
-            for i in range(config.self_play_file_increment):
-                base = os.path.splitext(file_list[i])[0]
-                os.rename(file_list[i], base+".done")
+                    if global_step % 10 == 0:
+                        training_network.summary_writer.add_summary(summary, global_step)
 
-            reps = reps + 1
+            print("saving checkpoint...")
+            filename = training_network.save_model("./checkpoints/training.ckpt")
 
-            #global_step = training_network.session.run(training_network.global_step)
-            #training_network.summary_writer.add_summary(summary, global_step)
+            generation = generation + 1
+            builder = tf.saved_model.builder.SavedModelBuilder(model_path+'metagraph-' + str(generation).zfill(8))
+            builder.add_meta_graph_and_variables(sess, ['SERVING'])
+            builder.save(as_text=False)
 
-            if reps > 0 and reps % config.training_repetition == 0:
-                print("saving checkpoint...")
-                filename = training_network.save_model("./checkpoints/training.ckpt")
+            last_model, generation = get_last_model(model_path)
+            print(last_model + " checkpoint is saved")
 
-                if os.path.exists(model_path+'temp/'):
-                    shutil.rmtree(model_path+'temp/')
+            # if global_step % config.training_repetition == 0:
+                #     print("saving checkpoint...")
+                #     filename = training_network.save_model("./checkpoints/training.ckpt")
+                #
+                #     if os.path.exists(model_path+'temp/'):
+                #         shutil.rmtree(model_path+'temp/')
+                #
+                #     builder = tf.saved_model.builder.SavedModelBuilder(model_path+'temp/')
+                #     builder.add_meta_graph_and_variables(sess, ['SERVING'])
+                #     builder.save(as_text=False)
+                #
+                #     need_evaluate = False
+                #     if( need_evaluate ):
+                #         import evaluate2 as evaluate
+                #         import math
+                #         print("evaluating checkpoint ...")
+                #
+                #         evaluate.play_cmd = play_cmd
+                #         evaluate.model1 = last_model.split('/')[-1]
+                #         evaluate.model2 = 'temp'
+                #
+                #         old_win, new_win = evaluate.evaluator(4, config.number_eval_games)
+                #         if new_win >= config.number_eval_games * (0.5 + math.sqrt(config.number_eval_games) / config.number_eval_games):
+                #             generation = generation + 1
+                #             os.rename(model_path+'temp', model_path+'metagraph-'+str(generation).zfill(8))
+                #             last_model, generation = get_last_model(model_path)
+                #             print("checkpoint is better. saved to " + 'metagraph-'+str(generation).zfill(8))
+                #         else:
+                #             #shutil.rmtree(model_path+'temp/')
+                #             print("checkpoint is discarded")
+                #     else:
+                #         generation = generation + 1
+                #         os.rename(model_path + 'temp', model_path + 'metagraph-' + str(generation).zfill(8))
+                #         last_model, generation = get_last_model(model_path)
+                #         print("checkpoint is saved")
 
-                builder = tf.saved_model.builder.SavedModelBuilder(model_path+'temp/')
-                builder.add_meta_graph_and_variables(sess, ['SERVING'])
-                builder.save(as_text=False)
-
-                import evaluate
-                print("evaluating checkpoint ...")
-
-                evaluate.play_cmd = play_cmd
-                evaluate.model1 = last_model.split('/')[-1]
-                evaluate.model2 = 'temp'
-
-                old_win, new_win = evaluate.evaluator(4, config.number_eval_games)
-                if new_win >= config.number_eval_games * 0.55:
-                    generation = generation + 1
-                    os.rename(model_path+'temp', model_path+'metagraph-'+str(generation).zfill(8))
-                    last_model, generation = get_last_model(model_path)
-                    print("checkpoint is better. saved to " + 'metagraph-'+str(generation).zfill(8))
-                    sess.run([training_to_best_op])
-                else:
-                    shutil.rmtree(model_path+'temp/')
-                    print("checkpoint is discarded")
+            #for i in range(config.self_play_file_increment):
+            #    base = os.path.splitext(file_list[i])[0]
+            #    os.rename(file_list[i], base+".done")
+            for f in file_list:
+                base = os.path.splitext(f)[0]
+                os.rename(f, base+".done")
 
 
 if __name__ == "__main__":
