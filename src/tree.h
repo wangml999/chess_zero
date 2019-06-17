@@ -266,14 +266,6 @@ public:
         }
         
         std::bernoulli_distribution distribution(resign_prob);
-        if(distribution(generator))
-        {
-            if (root->mean_value < resign_threshold)
-            {
-                value = -root->children[NN].mean_value;
-                return NN;
-            }
-        }
 
         float sum = 0.0;
         std::array<float, NN+1> values;
@@ -304,6 +296,14 @@ public:
         }
         
         value = -root->children[n].mean_value;
+
+        if(distribution(generator))
+        {
+            if (root->mean_value < resign_threshold)
+            {
+                n = NN;
+            }
+        }
         
         return n;
     }
