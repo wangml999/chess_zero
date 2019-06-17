@@ -234,15 +234,15 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
         else
         {
             vector<int> available_actions;
-
+            n = opponent_tree->search(board, item.probs, item.value);
             do
             {
                 string str;
                 
                 if(board.current + '0' == BLACK)
-                    std::cout << "(x) next: ";
+                    std::cout << "(x) next: (" << int_to_gtp(n) << ") ";
                 else
-                    std::cout << "(o) next: ";
+                    std::cout << "(o) next: (" << int_to_gtp(n) << ") ";
                 std::getline (std::cin, str);
 
                 n = gtp_to_int(str);
@@ -268,7 +268,7 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
             //std::cout << ", score: " << board.score();
             std::cout << ", value: " << item.value;
             std::cout << ", time: " << ns.count()*1.0/1000000000 << " seconds" << std::endl;
-            board.display(n);
+            board.display(n, -1, &item.probs);
             /*if(n==NN)
             {
                 if((board.score()>0 && board.current==WHITE)

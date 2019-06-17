@@ -135,7 +135,7 @@ public:
         return this->position.score();
     }
     
-    void display(int next_move=-1, int optimal_move=-1)
+    void display(int next_move=-1, int optimal_move=-1, array<float, NN+1>* probs=NULL)
     {
         enum class Color {BBLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WWHITE};
 
@@ -205,7 +205,19 @@ public:
 
             if ((i % WN) == (WN-1))
             {
-                std::cout << std::setw(3) << WN-i/WN << " " << s << std::endl;
+                std::cout << std::setw(3) << WN-i/WN << " " << s;
+
+		if(probs!=NULL)
+		{
+			std::cout << std::setw(3) << " ";
+			for(int k=0; k<WN; k++)
+			{
+			    std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[i-WN+1+k]*100 << " ";	
+			}
+			if( i == NN-1 )  
+			    std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[NN]*100 << " ";	
+		}
+		std::cout << std::endl;
                 s = "";
             }
             else
