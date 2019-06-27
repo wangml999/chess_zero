@@ -211,7 +211,7 @@ public:
     float score()
     {
         if(this->board == std::string(NN, EMPTY))
-            return 0;
+            return -KOMI;
         
         std::string working_board = this->board;
         
