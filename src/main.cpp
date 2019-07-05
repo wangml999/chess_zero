@@ -183,7 +183,7 @@ string int_to_gtp(int n)
     return gtp;
 }
 
-void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<logitem>& logs, bool verbose=true)
+void play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, float c2, vector<logitem>& logs, bool verbose=true)
 {
     auto game_start = std::chrono::high_resolution_clock::now();
     Tree *pt1=nullptr, *pt2=nullptr;
@@ -192,13 +192,13 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(0.01, -0.9, 1.0, rep1);  //allow resign if value is less than -0.
+            pt1 = new Tree(0.01, -0.9, 1.0, rep1, c1);  //allow resign if value is less than -0.
             pt1->pNetwork = pNetwork1;
         }
         
         if(pNetwork2!=nullptr)
         {
-            pt2 = new Tree(0.01, -0.9, 1.0, rep2);
+            pt2 = new Tree(0.01, -0.9, 1.0, rep2, c2);
             pt2->pNetwork = pNetwork2;
         }
     }
@@ -228,26 +228,30 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
         item.state = board.position.get_board();
         item.player = board.current;
         
-        int n;
+        int n, suggestion;
+        array<float, NN+1> child_values;
         if(current_tree != nullptr)
-            n = current_tree->search(board, item.probs, item.value);
+            n = current_tree->search(board, item.probs, item.value, child_values);
         else
         {
             vector<int> available_actions;
-            n = opponent_tree->search(board, item.probs, item.value);
+            suggestion = opponent_tree->search(board, item.probs, item.value, child_values);
             do
             {
                 string str;
                 
                 if(board.current + '0' == BLACK)
-                    std::cout << "(x) next: (" << int_to_gtp(n) << ") ";
+                    std::cout << "(x) next: (" << int_to_gtp(suggestion) << ") ";
                 else
-                    std::cout << "(o) next: (" << int_to_gtp(n) << ") ";
+                    std::cout << "(o) next: (" << int_to_gtp(suggestion) << ") ";
                 std::getline (std::cin, str);
 
                 n = gtp_to_int(str);
                 if( n == -1)
+		{
+		    board.display(n, -1, &item.probs, &child_values);
                     continue;
+		}
                 
                 available_actions = board.possible_actions();
             }while(!std::any_of(available_actions.begin(), available_actions.end(), [=](int i){return i==n;}));
@@ -266,9 +270,10 @@ void play(Network* pNetwork1, int rep1, Network* pNetwork2, int rep2, vector<log
             std::cout << int_to_gtp(n);
         
             //std::cout << ", score: " << board.score();
-            std::cout << ", value: " << item.value;
-            std::cout << ", time: " << ns.count()*1.0/1000000000 << " seconds" << std::endl;
-            board.display(n, -1, &item.probs);
+            std::cout << std::fixed << std::setprecision(3) << ", value: " << item.value;
+            std::cout << ", time: " << ns.count()*1.0/1000000000 << " seconds. ko " << board.position.ko << std::endl;
+
+            board.display(n, -1, &item.probs, &child_values);
             /*if(n==NN)
             {
                 if((board.score()>0 && board.current==WHITE)
@@ -338,6 +343,8 @@ int main(int argc, const char * argv[])
     int i = 0;
     int rep1 = MCTS_REPS;
     int rep2 = MCTS_REPS;
+    float c1 = CPUCT;
+    float c2 = CPUCT;
     while(i<argc)
     {
         if(string(argv[i]) == "-n")
@@ -389,6 +396,15 @@ int main(int argc, const char * argv[])
         {
             root_path = string(argv[i+1]);
         }
+
+	if(string(argv[i]) == "-c1")
+	{
+	    c1 = atof(argv[++i]);
+	}
+	if(string(argv[i]) == "-c2")
+	{
+	    c2 = atof(argv[++i]);	
+	}
 
         i++;
     }
@@ -477,7 +493,7 @@ int main(int argc, const char * argv[])
         logs.clear();
         try
         {
-            play(pnetwork1, rep1, pnetwork2, rep2, logs, verbose);
+            play(pnetwork1, rep1, c1, pnetwork2, rep2, c2, logs, verbose);
         }
         catch(...)
         {

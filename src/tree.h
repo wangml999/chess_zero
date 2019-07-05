@@ -128,12 +128,12 @@ public:
         }
     }
     
-    float puct_value(float total_visits_sqrt, float dir=0.0, float epsilon=0.0)
+    float puct_value(float total_visits_sqrt, float cpuct = 0.9, float dir=0.0, float epsilon=0.0)
     {
         if(prob < 0.00001)
             return -std::numeric_limits<int>::max();
         else
-            return -mean_value + CPUCT * ((1-epsilon)*prob+epsilon*dir) * total_visits_sqrt / (1+visits);
+            return -mean_value + cpuct * ((1-epsilon)*prob+epsilon*dir) * total_visits_sqrt / (1+visits);
     }
     
     int all_children_visits()
@@ -175,12 +175,13 @@ private:
     std::gamma_distribution<float> gamma_dist;
     vector<float> dirichlet_noise; 
     int mcts_reps;
+    float cpuct;	
     //atomic<int> count;
 public:
     TreeNode* root;
     Network* pNetwork;
     
-    Tree(float temp=1.0, float re_th=-0.9, float re_pro=0.9, int reps=MCTS_REPS) :
+    Tree(float temp=1.0, float re_th=-0.9, float re_pro=0.9, int reps=MCTS_REPS, float c=CPUCT) :
             dihedral(),
             generator(std::random_device{}()),
             TEMPERATURE(temp),
@@ -188,7 +189,8 @@ public:
             resign_prob(re_pro),
             gamma_dist(ALPHA),
             dirichlet_noise(NN+1),
-            mcts_reps(reps)
+            mcts_reps(reps),
+	    cpuct(c)
     {
         root = new TreeNode();
         pNetwork = nullptr;
@@ -234,7 +236,7 @@ public:
         root = newRoot;
     }
     
-    int search(Board& board, array<float, NN+1> &search_probs, float &value)
+    int search(Board& board, array<float, NN+1> &search_probs, float &value, std::array<float, NN+1>& child_values )
     {
         this->root->pos = board.position;
         this->root->player = board.current;
@@ -268,7 +270,7 @@ public:
         std::bernoulli_distribution distribution(resign_prob);
 
         float sum = 0.0;
-        std::array<float, NN+1> values;
+        //std::array<float, NN+1> values;
         for(int i=0; i<NN+1; i++)
         {
             if(this->mcts_reps > 0)
@@ -276,7 +278,7 @@ public:
             else
                 search_probs[i] = root->children[i].prob;
             
-            values[i] = -root->children[i].mean_value;
+            child_values[i] = -root->children[i].mean_value;
             sum += search_probs[i];
         }
         for(int i=0; i<NN+1; i++)
@@ -295,7 +297,7 @@ public:
             n = (int)std::distance(search_probs.begin(), std::max_element(search_probs.begin(), search_probs.end()));
         }
         
-        value = -root->children[n].mean_value;
+        value = root->mean_value;
 
         if(distribution(generator))
         {
@@ -509,13 +511,13 @@ public:
         if (parent->parent == nullptr && TEMPERATURE > 0.1)
         {
             for(int i=0; i<NN+1; i++)
-                uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, dirichlet_noise[i], 0.25);
+                uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, cpuct, dirichlet_noise[i], 0.25);
         }
         else
 #endif
         {
             for(int i=0; i<NN+1; i++)
-                uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt);
+                uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, cpuct);
         }
 
         int action = (int)std::distance(uct.begin(), std::max_element(uct.begin(), uct.end()));

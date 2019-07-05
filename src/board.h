@@ -135,7 +135,7 @@ public:
         return this->position.score();
     }
     
-    void display(int next_move=-1, int optimal_move=-1, array<float, NN+1>* probs=NULL)
+    void display(int next_move=-1, int optimal_move=-1, array<float, NN+1>* probs=NULL, array<float, NN+1>* values=NULL)
     {
         enum class Color {BBLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WWHITE};
 
@@ -159,7 +159,15 @@ public:
             header += "\033[1;" + std::to_string(board_color) + "m " + "\033[0m";
         }
 
-        std::cout << header << std::endl;
+        std::cout << header;
+	std::cout << std::setw(12) << " ";
+	std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[NN]*100 << " ";	
+	std::cout << std::setw(23) << " ";
+	std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*values)[NN] << " ";	
+	std::cout << std::endl;
+
+        std::vector<int> moves = this->position.not_allowed_actions(this->current);
+
         for(int i=0; i<NN; i++)
         {
             if( i % WN == 0)
@@ -212,11 +220,29 @@ public:
 			std::cout << std::setw(3) << " ";
 			for(int k=0; k<WN; k++)
 			{
-			    std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[i-WN+1+k]*100 << " ";	
+			    if(	std::find(moves.begin(), moves.end(), i-WN+1+k) != moves.end())
+				std::cout << std::setw(4) << "-" << " ";	
+			    else	
+			        std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[i-WN+1+k]*100 << " ";	
 			}
-			if( i == NN-1 )  
-			    std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[NN]*100 << " ";	
+			//if( i == NN-1 )  
+			//    std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*probs)[NN]*100 << " ";	
 		}
+
+		if(values!=NULL)
+		{
+			std::cout << std::setw(3) << " ";
+			for(int k=0; k<WN; k++)
+			{
+			    if(	std::find(moves.begin(), moves.end(), i-WN+1+k) != moves.end())
+				std::cout << std::setw(4) << "-" << " ";	
+			    else	
+			        std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*values)[i-WN+1+k] << " ";	
+			}
+			//if( i == NN-1 )  
+			    //std::cout << std::setw(4) << std::setprecision(1) << std::fixed << (*values)[NN] << " ";	
+		}
+
 		std::cout << std::endl;
                 s = "";
             }
