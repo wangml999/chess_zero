@@ -52,7 +52,7 @@ public:
     Position()
     {
         this->board = "";
-        this->ko = -1;
+        this->ko = NONE;
     }
     
     Position(std::string board, int ko)

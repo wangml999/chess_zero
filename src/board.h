@@ -97,7 +97,10 @@ public:
             pass_count = 0;
         }
         else
+		{
+			position.ko = NONE;
             pass_count++;
+		}
 
         steps += 1;
         current = position.swap_colors(current);

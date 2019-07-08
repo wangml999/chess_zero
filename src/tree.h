@@ -163,7 +163,7 @@ public:
 class Tree
 {
 private:
-    float TEMPERATURE;
+    int mode;
     std::mt19937 generator;
     dihedral_method dihedral;
     vector<TreeNode*> expand_buffer;
@@ -181,10 +181,10 @@ public:
     TreeNode* root;
     Network* pNetwork;
     
-    Tree(float temp=1.0, float re_th=-0.9, float re_pro=0.9, int reps=MCTS_REPS, float c=CPUCT) :
+    Tree(int m=EVALUATE, float re_th=-0.9, float re_pro=0.9, int reps=MCTS_REPS, float c=CPUCT) :
             dihedral(),
             generator(std::random_device{}()),
-            TEMPERATURE(temp),
+            mode(m),
             resign_threshold(re_th),
             resign_prob(re_pro),
             gamma_dist(ALPHA),
@@ -267,9 +267,8 @@ public:
             }
         }
         
-        std::bernoulli_distribution distribution(resign_prob);
+        std::bernoulli_distribution resign_distribution(resign_prob);
 
-        float sum = 0.0;
         //std::array<float, NN+1> values;
         for(int i=0; i<NN+1; i++)
         {
@@ -279,27 +278,49 @@ public:
                 search_probs[i] = root->children[i].prob;
             
             child_values[i] = -root->children[i].mean_value;
-            sum += search_probs[i];
-        }
-        for(int i=0; i<NN+1; i++)
-        {
-            search_probs[i] = search_probs[i] / sum;
         }
 
         int n;
-        if(TEMPERATURE > 0.1 && root->level < int(0.1*NN))  //first 10% steps are not deterministic to create more randomness
+		int max_visit = *std::max_element(search_probs.begin(), search_probs.end());
+		if( max_visit < 1 )
+			max_visit = 1;
+
+		array<float, NN+1> decision_probs;
+        for(int i=0; i<NN+1; i++)
+			decision_probs[i] = search_probs[i] / (float)max_visit;
+
+		float temperature = 0.01;
+        if(mode == SELF_PLAY && root->level < int(0.1*NN))  //first 10% steps are not deterministic to create more randomness
+			temperature = 1.0;
+		else
+			temperature = 0.01;
+
+        float sum = 0.0;
+        for(int i=0; i<NN+1; i++)
         {
-            std::discrete_distribution<int> distribution(search_probs.begin(), search_probs.end());
-            n = distribution(generator);
-        }
-        else
-        {
-            n = (int)std::distance(search_probs.begin(), std::max_element(search_probs.begin(), search_probs.end()));
-        }
+			decision_probs[i] = pow(decision_probs[i], 1.0/temperature);
+			sum = sum + decision_probs[i];
+    	}
+        for(int i=0; i<NN+1; i++)
+			decision_probs[i] = decision_probs[i] / sum;
+
+        std::discrete_distribution<int> distribution(decision_probs.begin(), decision_probs.end());
+        n = distribution(generator);
         
+
+        sum = 0.0;
+        for(int i=0; i<NN+1; i++)
+        {
+			sum = sum + search_probs[i];
+    	}
+        for(int i=0; i<NN+1; i++)
+        {
+			search_probs[i] = search_probs[i] / sum;
+    	}
+
         value = root->mean_value;
 
-        if(distribution(generator))
+        if(resign_distribution(generator))
         {
             if (root->mean_value < resign_threshold)
             {
@@ -508,7 +529,7 @@ public:
         float total_visits_sqrt = sqrt(parent->visits);
         array<float, NN+1> uct;
 #ifdef ADD_DIRICHLET_NOISE
-        if (parent->parent == nullptr && TEMPERATURE > 0.1)
+        if (parent->parent == nullptr && mode == SELF_PLAY)
         {
             for(int i=0; i<NN+1; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, cpuct, dirichlet_noise[i], 0.25);

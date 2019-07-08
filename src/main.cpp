@@ -183,7 +183,7 @@ string int_to_gtp(int n)
     return gtp;
 }
 
-void play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, float c2, vector<logitem>& logs, bool verbose=true)
+int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, float c2, vector<logitem>& logs, bool verbose=true)
 {
     auto game_start = std::chrono::high_resolution_clock::now();
     Tree *pt1=nullptr, *pt2=nullptr;
@@ -192,13 +192,13 @@ void play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, 
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(0.01, -0.9, 1.0, rep1, c1);  //allow resign if value is less than -0.
+            pt1 = new Tree(EVALUATE, -0.9, 1.0, rep1, c1);  //allow resign if value is less than -0.
             pt1->pNetwork = pNetwork1;
         }
         
         if(pNetwork2!=nullptr)
         {
-            pt2 = new Tree(0.01, -0.9, 1.0, rep2, c2);
+            pt2 = new Tree(EVALUATE, -0.9, 1.0, rep2, c2);
             pt2->pNetwork = pNetwork2;
         }
     }
@@ -206,7 +206,7 @@ void play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, 
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(1.0, -2.0, 1.0, rep1);
+            pt1 = new Tree(SELF_PLAY, -2.0, 1.0, rep1);
             pt1->pNetwork = pNetwork1;
         
             pt2 = pt1;
@@ -328,6 +328,7 @@ void play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, 
     auto diff = game_end-game_start;
     std::chrono::nanoseconds game_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diff);
     std::cout << "winner: " << status << " score: " << std::fixed << std::setprecision(1) << board.score() << " steps: " << board.steps << " time: " << game_ns.count()*1.0/1000000000 << " seconds" << std::endl;
+    return status;	
 }
 
 int main(int argc, const char * argv[])

@@ -26,4 +26,7 @@
 #define ALPHA 0.3
 //#define TENSORFLOW_BENCHMARK
 
+#define SELF_PLAY 1
+#define EVALUATE 2
+
 #endif
