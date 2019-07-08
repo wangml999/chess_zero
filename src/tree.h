@@ -287,7 +287,7 @@ public:
         }
 
         int n;
-        if(TEMPERATURE > 0.1 && root->level < int(0.1*NN))
+        if(TEMPERATURE > 0.1 && root->level < int(0.1*NN))  //first 10% steps are not deterministic to create more randomness
         {
             std::discrete_distribution<int> distribution(search_probs.begin(), search_probs.end());
             n = distribution(generator);
