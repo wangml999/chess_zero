@@ -290,7 +290,7 @@ public:
 			decision_probs[i] = search_probs[i] / (float)max_visit;
 
 		float temperature = 0.01;
-        if(mode == SELF_PLAY && root->level < int(0.1*NN))  //first 10% steps are not deterministic to create more randomness
+        if(mode == SELF_PLAY && root->level < min(4, int(0.1*NN)))  //first 10% or first 4 steps are not deterministic to create more randomness
 			temperature = 1.0;
 		else
 			temperature = 0.01;
@@ -320,9 +320,9 @@ public:
 
         value = root->mean_value;
 
-        if(resign_distribution(generator))
+		if (root->mean_value < resign_threshold && root->level > NN)  // disable resign prior to NN steps
         {
-            if (root->mean_value < resign_threshold)
+        	if(resign_distribution(generator))
             {
                 n = NN;
             }
@@ -417,10 +417,13 @@ public:
     
     void expand(vector<TreeNode*>& leaves, vector<float>& values)
     {
-	vector<int> methods;
-	std::uniform_int_distribution<int> distribution(0,7);
+		vector<int> methods;
+		std::uniform_int_distribution<int> distribution(0,7);
         for(int node_id=0; node_id<leaves.size(); node_id++)
-            methods.push_back(distribution(generator));
+			if(mode == EVALUATE)	
+            	methods.push_back(distribution(generator));  // we need some randomness in evaluation
+			else
+	            methods.push_back(0); //distribution(generator));  decided not to transform board in play mode. instead this should be done in train to avoid bias. 
 	Tensor* p_states = nullptr;
 
 #ifdef TENSORFLOW_BENCHMARK        
@@ -466,7 +469,7 @@ public:
                     v = v / sum_of_probs;
                 });
 
-		int method = methods[node_id];
+				int method = methods[node_id];
                 if (method != 0)
                 {
                     for(int i=0; i<NN; i++)
@@ -475,6 +478,10 @@ public:
                 }
                 else
                     prob = tmpprob_vector[node_id];
+
+                for(int i=0; i<=NN; i++)  // test code. clip any prob smaller than 0.01 to give chance being selected in MCTS.
+					if( prob[i] < 0.01 )
+						prob[i] = 0.01;
 
                 std::vector<int> moves = leaf->pos.not_allowed_actions(leaf->player);
             

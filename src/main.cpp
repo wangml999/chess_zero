@@ -183,7 +183,7 @@ string int_to_gtp(int n)
     return gtp;
 }
 
-int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, float c2, vector<logitem>& logs, bool verbose=true)
+int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, float c2, string& pos, char player, vector<logitem>& logs, bool verbose=true)
 {
     auto game_start = std::chrono::high_resolution_clock::now();
     Tree *pt1=nullptr, *pt2=nullptr;
@@ -192,13 +192,13 @@ int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, f
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(EVALUATE, -0.9, 1.0, rep1, c1);  //allow resign if value is less than -0.
+            pt1 = new Tree(EVALUATE, -0.9, 0.9, rep1, c1);  //allow resign if value is less than -0.
             pt1->pNetwork = pNetwork1;
         }
         
         if(pNetwork2!=nullptr)
         {
-            pt2 = new Tree(EVALUATE, -0.9, 1.0, rep2, c2);
+            pt2 = new Tree(EVALUATE, -0.9, 0.9, rep2, c2);
             pt2->pNetwork = pNetwork2;
         }
     }
@@ -206,14 +206,14 @@ int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, f
     {
         if(pNetwork1!=nullptr)
         {
-            pt1 = new Tree(SELF_PLAY, -2.0, 1.0, rep1);
+            pt1 = new Tree(SELF_PLAY, -0.9, 0.9, rep1);
             pt1->pNetwork = pNetwork1;
         
             pt2 = pt1;
         }
     }
     
-    Board board;
+    Board board(pos.c_str(), player);
     
     int status;
     Tree* current_tree, *opponent_tree;
@@ -248,10 +248,10 @@ int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, f
 
                 n = gtp_to_int(str);
                 if( n == -1)
-		{
-		    board.display(n, -1, &item.probs, &child_values);
+				{
+		    		board.display(n, -1, &item.probs, &child_values);
                     continue;
-		}
+				}
                 
                 available_actions = board.possible_actions();
             }while(!std::any_of(available_actions.begin(), available_actions.end(), [=](int i){return i==n;}));
@@ -274,6 +274,16 @@ int play(Network* pNetwork1, int rep1, float c1, Network* pNetwork2, int rep2, f
             std::cout << ", time: " << ns.count()*1.0/1000000000 << " seconds. ko " << board.position.ko << std::endl;
 
             board.display(n, -1, &item.probs, &child_values);
+
+			/*for(int i=0; i<WN; i++)
+			{
+				for(int j=0; j<WN; j++)
+				{
+					std::cout << std::fixed << std::setprecision(5) << current_tree->root->children[i*WN+j].prob << " ";
+				}
+				std::cout << std::endl;
+			}
+			std::cout << std::fixed << std::setprecision(5) << current_tree->root->children[NN].prob << std::endl;*/
             /*if(n==NN)
             {
                 if((board.score()>0 && board.current==WHITE)
@@ -346,6 +356,8 @@ int main(int argc, const char * argv[])
     int rep2 = MCTS_REPS;
     float c1 = CPUCT;
     float c2 = CPUCT;
+	string pos = std::string(NN, EMPTY);
+	char player = BLACK;
     while(i<argc)
     {
         if(string(argv[i]) == "-n")
@@ -398,14 +410,25 @@ int main(int argc, const char * argv[])
             root_path = string(argv[i+1]);
         }
 
-	if(string(argv[i]) == "-c1")
-	{
-	    c1 = atof(argv[++i]);
-	}
-	if(string(argv[i]) == "-c2")
-	{
-	    c2 = atof(argv[++i]);	
-	}
+		if(string(argv[i]) == "-c1")
+		{
+	    	c1 = atof(argv[++i]);
+		}
+		if(string(argv[i]) == "-c2")
+		{
+	    	c2 = atof(argv[++i]);	
+		}
+		if(string(argv[i]) == "-pos")
+		{
+	    	pos = string(argv[++i]);
+		}
+		if(string(argv[i]) == "-player")
+		{
+	    	string s = string(argv[++i]);	
+			if( s[0] == BLACK || s[0] == WHITE)
+				player = s[0];
+			std::cout << player << std::endl;
+		}
 
         i++;
     }
@@ -494,7 +517,7 @@ int main(int argc, const char * argv[])
         logs.clear();
         try
         {
-            play(pnetwork1, rep1, c1, pnetwork2, rep2, c2, logs, verbose);
+            play(pnetwork1, rep1, c1, pnetwork2, rep2, c2, pos, player, logs, verbose);
         }
         catch(...)
         {

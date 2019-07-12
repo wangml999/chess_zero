@@ -65,7 +65,10 @@ public:
     
     Board(const char *initial_state, char player) : Board()
     {
-        this->position = Position(string(initial_state), NONE);
+		if(string(initial_state) != "")
+	        this->position = Position(string(initial_state), NONE);
+		else
+        	this->position = Position::initial_state();
         current = player;
     }
     
