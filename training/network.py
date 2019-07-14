@@ -117,10 +117,10 @@ class Network(object):
                 #self.value = tf.cast(value_net, tf.float32, name="out_value")
 
         if training:
-            with tf.variable_scope("entropy_loss"):
+            with tf.variable_scope("action_loss"):
                 action_onehot = tf.one_hot(self.actions, output_dim, name="action_onehot")
                 #single_action_prob = tf.reduce_sum(self.action_prob * action_onehot, axis=1)
-                #advantage = tf.reduce_sum(self.rewards - self.value, axis=1)
+                advantage = tf.reduce_sum(self.rewards - self.value, axis=1)
 
                 #ratio = tf.reduce_sum(self.action_prob*action_onehot, axis=1) / tf.reduce_sum(self.actions_pi*action_onehot, axis=1)
 
@@ -128,9 +128,10 @@ class Network(object):
                 OLDNEGLOGPAC = -tf.log(tf.reduce_sum(self.actions_pi*action_onehot, axis=1))
                 ratio = tf.exp(OLDNEGLOGPAC - neglogpac)
 
-                loss1 = ratio * self.rewards
-                loss2 = tf.clip_by_value(ratio, 1-self.clip_range, 1+self.clip_range) * self.rewards
-                self.actor_loss = tf.reduce_mean(-tf.minimum(loss1, loss2))
+                loss1 = -ratio * self.rewards
+                loss2 = -tf.clip_by_value(ratio, 1-self.clip_range, 1+self.clip_range) * self.rewards
+                #self.actor_loss = tf.reduce_mean(-tf.minimum(loss1, loss2))
+                self.actor_loss = tf.reduce_mean(tf.maximum(loss1, loss2))
 
                 approxkl = .5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC))
                 clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), self.clip_range)))
@@ -141,12 +142,31 @@ class Network(object):
             # value network
             with tf.variable_scope("value_loss"):
                 #self.value = tf.clip_by_value(self.value, 0.8 * self.rewards, 1.2 * self.rewards)
-                self.value_loss = 0.5 * tf.reduce_mean(tf.square(self.rewards - self.value))
+                #self.value_loss = 0.5 * tf.reduce_mean(tf.square(self.rewards - self.value))
+                vpred = self.value
+                vpredclipped = self.old_values + tf.clip_by_value(self.value - self.old_values, - self.clip_range, self.clip_range)
+                # Unclipped value
+                vf_losses1 = tf.square(vpred - self.rewards)
+                # Clipped value
+                vf_losses2 = tf.square(vpredclipped - self.rewards)
 
-            self.l2_loss = tf.losses.get_regularization_loss(scope=name)
+                self.value_loss = 0.5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
+
+            with tf.variable_scope("entropy_loss"):
+                def entropy(logits):
+                    a0 = logits - tf.reduce_max(logits, axis=-1, keepdims=True)
+                    ea0 = tf.exp(a0)
+                    z0 = tf.reduce_sum(ea0, axis=-1, keepdims=True)
+                    p0 = ea0 / z0
+                    return tf.reduce_sum(p0 * (tf.log(z0) - a0), axis=-1)
+
+                self.entropy_loss = tf.reduce_mean(entropy(logits))
+
+            #self.l2_loss = tf.losses.get_regularization_loss(scope=name)
 
             with tf.variable_scope("total_loss"):
-                self.total_loss = self.actor_loss + self.value_loss + self.l2_loss
+                #self.total_loss = self.actor_loss + 0.5 * self.value_loss + self.l2_loss
+                self.total_loss = self.actor_loss + 0.5 * self.value_loss - 0.01 * self.entropy_loss
 
             trainables = tf.trainable_variables(name)
             var_list = trainables + [var for var in tf.global_variables(name)
@@ -162,16 +182,21 @@ class Network(object):
             self.saver = tf.train.Saver(var_list=var_list, max_to_keep=10)
 
             if logdir:
-                entropy_summary = tf.summary.scalar("loss/entropy", self.actor_loss)
+                action_summary = tf.summary.scalar("loss/action", self.actor_loss)
                 value_loss_summary = tf.summary.scalar("loss/value", self.value_loss)
+                entry_loss_summary = tf.summary.scalar("loss/entropy", self.entropy_loss)
+
                 loss_summary = tf.summary.scalar("loss/total", self.total_loss)
                 kl_summary = tf.summary.scalar("misc/kl", approxkl)
                 clip_summary = tf.summary.scalar("misc/clipfrac", clipfrac)
                 ratio_summary = tf.summary.scalar("misc/ratio", tf.reduce_mean(ratio))
+                learning_rate_summary = tf.summary.scalar("misc/lr", tf.reduce_mean(self.learning_rate))
+
                 action_prob_summary = tf.summary.histogram("action prob", self.action_prob)
                 value_summary = tf.summary.histogram("values", self.value)
+                ratio_hist_summary = tf.summary.histogram("ratio", ratio)
 
-                self.summary_op = tf.summary.merge([entropy_summary, value_loss_summary, loss_summary, action_prob_summary, value_summary, kl_summary, clip_summary, ratio_summary])
+                self.summary_op = tf.summary.merge([action_summary, value_loss_summary, entry_loss_summary, loss_summary, action_prob_summary, value_summary, kl_summary, clip_summary, ratio_summary, ratio_hist_summary, learning_rate_summary])
                 self.summary_writer = tf.summary.FileWriter(logdir, self.session.graph)
 
         self.init_all_vars_op = tf.variables_initializer(tf.global_variables(), name='init_all_vars_op')
@@ -181,32 +206,32 @@ class Network(object):
         return self.session.run([self.action_prob, self.value], {self.states:input})
 
     def restore_model(self, path):
-        try:
-            ckpt = tf.train.get_checkpoint_state(path)
-            self.saver.restore(self.session, ckpt.model_checkpoint_path)
-            print("model restored "+ckpt.model_checkpoint_path)
-        except Exception as e:
-            print(e)
-            print("no saved model to load. starting new session")
-            pass
+       try:
+           ckpt = tf.train.get_checkpoint_state(path)
+           self.saver.restore(self.session, ckpt.model_checkpoint_path)
+           print("model restored "+ckpt.model_checkpoint_path)
+       except Exception as e:
+           print(e)
+           print("no saved model to load. starting new session")
+           pass
 
     def restore_model2(self, path):
-        try:
-            loader = tf.saved_model.loader.load(self.session, ["SERVING"], path)
-            print("model restored "+path)
-        except Exception as e:
-            print(e)
-            print("no saved model to load. starting new session")
-            pass
+       try:
+           loader = tf.saved_model.loader.load(self.session, ["SERVING"], path)
+           print("model restored "+path)
+       except Exception as e:
+           print(e)
+           print("no saved model to load. starting new session")
+           pass
 
     def restore_specific_model(self, path):
-        try:
-            self.saver.restore(self.session, path)
-            print("model restored " + path)
-        except Exception as e:
-            print(e)
-            print("no saved model to load. starting new session")
-            pass
+       try:
+           self.saver.restore(self.session, path)
+           print("model restored " + path)
+       except Exception as e:
+           print(e)
+           print("no saved model to load. starting new session")
+           pass
 
     def save_model(self, filename):
-        return self.saver.save(self.session, filename, global_step=self.session.run(self.global_step))
+       return self.saver.save(self.session, filename, global_step=self.session.run(self.global_step))

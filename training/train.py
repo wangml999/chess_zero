@@ -12,6 +12,51 @@ import config
 import shutil
 #from tensorflow.python import debug as tf_debug
 
+class dihedral_method:
+    def __init__(self, N):
+        self.N = N
+        self.transform = []
+        self.transform.append(self.method0)
+        self.transform.append(self.method1)
+        self.transform.append(self.method2)
+        self.transform.append(self.method3)
+        self.transform.append(self.method4)
+        self.transform.append(self.method5)
+        self.transform.append(self.method6)
+        self.transform.append(self.method7)
+
+    def method0(self, base):
+        return base
+
+    def method1(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.rot90(base).flatten().tolist()
+
+    def method2(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.rot90(base, 2).flatten().tolist()
+
+    def method3(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.rot90(base, 3).flatten().tolist()
+
+    def method4(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.flip(base, 0).flatten().tolist()
+
+    def method5(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.flip(base, 1).flatten().tolist()
+
+    def method6(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.transpose(base).flatten().tolist()
+
+    def method7(self, base):
+        base = np.array(base).reshape([self.N, self.N])
+        return np.flip(np.rot90(base),1).flatten().tolist()
+
+
 class data_manager:
     def __init__(self, path):
         self.last_loaded_file = ""
@@ -68,34 +113,53 @@ class data_manager:
 
 
     def load_data2(self, most_recent_games, generation, N):
-        file_list = [file for file in glob.glob(self.path+"/"+"selfplay-*.txt")]
-        file_list.sort(key=os.path.basename)
-        if len(file_list) < most_recent_games:
-            return None, None
+        file_list = []
+        gen = generation
+        while len(file_list) < most_recent_games:
+            tmplist = [file for file in glob.glob(self.path+"/"+"selfplay-"+format(gen, '08')+"*.*")]
+            if(len(tmplist)==0):
+                break
+            file_list = file_list + tmplist[:most_recent_games-len(file_list)]
+            gen = gen - 1
 
-        file_list = file_list[:most_recent_games]
         data = []
         n = 0
+        d = dihedral_method(N)
         current_player, opponent = 1, 2
         while n < len(file_list):
             print("loading self-play file " + file_list[n])
 
             with open(file_list[n], "r") as f:
+                one_game = []
                 for line in f:
                     mylist = line.rstrip('\n').split(',')
                     state = mylist[0]
                     if state == '0'*(N*N):
-                        current_player, opponent = 1, 2
+                        if len(one_game) > 0:
+                            # transform one game to 8 directions
+                            for direction in range(0, 8):
+                                lookup = d.transform[direction]([x for x in range(N*N)])
+                                current_player, opponent = 1, 2
+                                for step in one_game:
+                                    fields = step.rstrip('\n').split(',')
+                                    state = fields[0]   # this one needs to be transformed
+                                    newstate = "".join(d.transform[direction](base=list(state)))
+                                    player = current_player
+                                    current_player, opponent = opponent, current_player
+                                    action = int(fields[1])  # this one needs to be transformed
+                                    if action != N*N:
+                                        newaction = lookup.index(action)
+                                    else:
+                                        newaction = action
+                                    probs = [float(x) for x in fields[2:-2]]  # this one needs to be transformed
+                                    probs = [x / sum(probs) for x in probs]
+                                    newprobs = d.transform[direction](base=probs[:-1])+[probs[-1]]
+                                    reward = float(fields[-2])
+                                    oldvalue = float(fields[-1])
+                                    data.append((newstate, player, newaction, newprobs, reward, oldvalue))
 
-                    player = current_player
-                    current_player, opponent = opponent, current_player
-                    action = int(mylist[1])
-                    probs = [float(x) for x in mylist[2:-2]]
-                    probs = tuple([x/sum(probs) for x in probs])
-                    reward = float(mylist[-2])
-                    oldvalue = float(mylist[-1])
-
-                    data.append((state, player, action, probs, reward, oldvalue))
+                            one_game = []
+                    one_game.append(line)
             n+=1
 
             #if len(self.data) + len(data) > self.max_list_length:
@@ -180,7 +244,7 @@ def train(N):
     batch_size = config.self_play_file_batch_size
     gpu_options = tf.GPUOptions()
     gpu_options.allow_growth = True
-    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+    with tf.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         #sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
         #best_network = Network("best_network", sess, N, channels)
         training_network = Network("training_network", sess, N, channels, True, "./log/")
@@ -208,27 +272,32 @@ def train(N):
 
         #trainables = tf.trainable_variables("training_network")
         reps = 0
-        nupdates = 500
-        lr = lambda f: f * 2.5e-4
-        cliprange = lambda f: f * 0.1
-        for update in range(1, nupdates+1):
+        nupdates = 700
+        lr = lambda f: 1e-3 if f < 500 else 1e-4
+        cliprange = lambda f: 0.2 if f < 500 else 0.1
+        #lr = lambda  f: 1e-4
+        #cliprange = lambda  f: 0.1
+
+        first = True
+        for update in range(generation+1, nupdates+1):
             # using current generation model to sample batch_size files. each file has 100 games
             file_list, training_data = dm.load_data2(batch_size, generation, N)
-            if training_data is None:
-                dm.sample(batch_size, generation, N)
+            if training_data is None or len(training_data)==0:
+                dm.sample(1, generation, N)
                 file_list, training_data = dm.load_data2(batch_size, generation, N)
 
-            while training_data is None:
+            while training_data is None or len(training_data) == 0:
                 import time
                 print("not enough training data. sleep...")
                 time.sleep(config.sleep_seconds)
                 file_list, training_data = dm.load_data2(batch_size, generation, N)
 
-            frac = 1.0  - (update - 1.0) / nupdates
+            #frac = 1.0  - (update - 1.0) / nupdates
+            frac = update
             #frac = 1.0 * 0.996 ** (update - 1.0)
             print("learning rate:{} Clip Range {}".format(lr(frac), cliprange(frac)))
             inds = np.arange(len(training_data))
-            for _ in range(4):
+            for _ in range(config.batch_epochs):
                 # Randomize the indexes
                 np.random.shuffle(inds)
                 # 0 to batch_size with batch_train_size step
@@ -292,8 +361,8 @@ def train(N):
                         training_network.clip_range: cliprange(frac),
                     }
 
-                    global_step, summary, _, entropy, value_loss, l2_loss = sess.run([training_network.global_step, training_network.summary_op, training_network.apply_gradients, training_network.actor_loss, training_network.value_loss, training_network.l2_loss], feed)
-                    print(global_step, entropy, value_loss, l2_loss)
+                    global_step, summary, _, action_loss, value_loss, entropy = sess.run([training_network.global_step, training_network.summary_op, training_network.apply_gradients, training_network.actor_loss, training_network.value_loss, training_network.entropy_loss], feed)
+                    print(global_step, action_loss, value_loss, entropy)
 
                     if global_step % 10 == 0:
                         training_network.summary_writer.add_summary(summary, global_step)
@@ -307,7 +376,7 @@ def train(N):
             builder.save(as_text=False)
 
             last_model, generation = get_last_model(model_path)
-            print(last_model + " checkpoint is saved")
+            print(last_model + " is saved")
 
             # if global_step % config.training_repetition == 0:
                 #     print("saving checkpoint...")
@@ -352,11 +421,11 @@ def train(N):
                 base = os.path.splitext(f)[0]
                 os.rename(f, base+".done")
 
-
 if __name__ == "__main__":
     import sys
 
     n = 5
+
     if len(sys.argv) == 2:
         n = int(sys.argv[1])
     train(n)
