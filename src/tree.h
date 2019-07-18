@@ -281,16 +281,16 @@ public:
         }
 
         int n;
-		int max_visit = *std::max_element(search_probs.begin(), search_probs.end());
-		if( max_visit < 1 )
-			max_visit = 1;
+		float max_visit = *std::max_element(search_probs.begin(), search_probs.end());
+		//if( max_visit < 1 )
+		//	max_visit = 1;
 
 		array<float, NN+1> decision_probs;
         for(int i=0; i<NN+1; i++)
 			decision_probs[i] = search_probs[i] / (float)max_visit;
 
 		float temperature = 0.01;
-        if(mode == SELF_PLAY && root->level < min(4, int(0.1*NN)))  //first 10% or first 4 steps are not deterministic to create more randomness
+        if(mode == SELF_PLAY) // && root->level < min(4, int(0.1*NN)))  //first 10% or first 4 steps are not deterministic to create more randomness
 			temperature = 1.0;
 		else
 			temperature = 0.01;
