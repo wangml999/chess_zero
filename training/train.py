@@ -104,11 +104,11 @@ class data_manager:
 
     def sample(self, batch_size, generation, N):
         import subprocess
-        play_cmd = '../bin/go_zero'
+        play_cmd = '../bin/chess_r'
         procs = []
         print("sampling...")
         for _ in range(batch_size):
-            proc = subprocess.Popen([play_cmd, '-m1', 'metagraph-'+format(generation, '08'), '-save', '-s', '-n', str(100)])
+            proc = subprocess.Popen([play_cmd, '-m1', str(generation), '-log', '-s', '-n', str(100)], cwd=r'../bin/')
             proc.wait()
 
 
@@ -125,41 +125,45 @@ class data_manager:
         data = []
         n = 0
         d = dihedral_method(N)
-        current_player, opponent = 1, 2
+
         while n < len(file_list):
             print("loading self-play file " + file_list[n])
-
+            step = 0
             with open(file_list[n], "r") as f:
-                one_game = []
-                for line in f:
-                    mylist = line.rstrip('\n').split(',')
-                    state = mylist[0]
-                    if state == '0'*(N*N):
-                        if len(one_game) > 0:
-                            # transform one game to 8 directions
-                            for direction in range(0, 8):
-                                lookup = d.transform[direction]([x for x in range(N*N)])
-                                current_player, opponent = 1, 2
-                                for step in one_game:
-                                    fields = step.rstrip('\n').split(',')
-                                    state = fields[0]   # this one needs to be transformed
-                                    newstate = "".join(d.transform[direction](base=list(state)))
-                                    player = current_player
-                                    current_player, opponent = opponent, current_player
-                                    action = int(fields[1])  # this one needs to be transformed
-                                    if action != N*N:
-                                        newaction = lookup.index(action)
-                                    else:
-                                        newaction = action
-                                    probs = [float(x) for x in fields[2:-2]]  # this one needs to be transformed
-                                    probs = [x / sum(probs) for x in probs]
-                                    newprobs = d.transform[direction](base=probs[:-1])+[probs[-1]]
-                                    reward = float(fields[-2])
-                                    oldvalue = float(fields[-1])
-                                    data.append((newstate, player, newaction, newprobs, reward, oldvalue))
+                line = f.readline().rstrip('\n')
+                while line:
+                    if line == 'START' or line == 'FINISH':
+                        step = 0
+                    else:
+                        fen = line
+                        line = f.readline().rstrip('\n')
 
-                            one_game = []
-                    one_game.append(line)
+                        try:
+                            current_player, action, move, original_value, value, reward = line.split(',')
+                        except:
+                            current_player, action, move, value, reward = line.split(',')
+                            original_value = 0.0
+
+                        current_player = int(current_player)
+                        action = int(action)
+                        original_value=float(original_value)
+                        value = float(value)
+                        reward = float(reward)
+                        opponent = (current_player+1) % 2
+                        line = f.readline().rstrip('\n').rstrip(',')
+                        legal_moves = [int(m) for m in line.split(',')]
+                        line = f.readline().rstrip('\n').rstrip(',')
+                        legal_move_probs = [float(p) for p in line.split(',')]
+                        line = f.readline().rstrip('\n').rstrip(',')
+                        original_probs = [float(p) for p in line.split(',')]
+                        assert len(legal_moves) == len(legal_move_probs)
+
+                        if reward!=0:
+                            data.append((step, fen, current_player, action, legal_moves, legal_move_probs, original_probs, reward, original_value))
+                        #else:
+                        #    data.append((step, fen, current_player, action, legal_moves, legal_move_probs, -1.0, original_value))
+                        step=step+1
+                    line = f.readline().rstrip('\n')
             n+=1
 
             #if len(self.data) + len(data) > self.max_list_length:
@@ -202,11 +206,12 @@ def copy_src_to_dst(from_scope, to_scope):
     return op_holder
 
 def get_last_model(path):
-    file_list = sorted([file for file in glob.glob(path + "/" + "metagraph-*")])
+    file_list = sorted([file for file in glob.glob(path + "/" + "*") if file.split('/')[-1].isdigit()], key=lambda x: int(x.split('/')[-1]))
+
     if len(file_list) == 0:
         return "", -1
-    fields = file_list[-1].split('-')
-    return file_list[-1], int(fields[1])
+    fields = file_list[-1].split('/')
+    return file_list[-1], int(fields[-1])
 
 def evaluate(cmd, model1, model2, num_games, verbose=False):
     import subprocess
@@ -227,6 +232,91 @@ def evaluate(cmd, model1, model2, num_games, verbose=False):
             break
     return win1, win2
 
+def fen_to_bitboard(fen, side):
+    lookup = "PpNnRrBbQqKk"
+    side_lookup = "wb"
+
+    if(side==1):
+        lookup = lookup.swapcase()
+
+    bits = np.zeros([14,8,8], dtype=float)
+
+    pos = 0
+    row = 7
+    while row >= 0:
+        while (fen[pos] == '/'):
+            pos+=1
+            row-=1
+
+        col = 0
+        while col < 8:
+            c = fen[pos]
+            pos+=1
+
+            if c >= '1' and c <= '8':
+                col+=int(c)
+            else:
+                try:
+                    n = lookup.index(c) # me 0 2 4 6 8 10, enermy 1 3 5 7 9 11
+                except:
+                    print(c)
+                n = int(n/2)+6*(n%2)
+                if(side==1):
+                    bits[n, 7-row, 7-col] = 1
+                else:
+                    bits[n, row, col] = 1
+                col+=1
+        if(row==0):
+            break
+
+    bits[12:14].fill(0)
+
+    while fen[pos] == ' ':
+        pos += 1
+
+    #assert side_lookup.index(fen[pos]) == side
+    pos += 1
+
+    while fen[pos] == ' ':
+        pos += 1
+
+    str_castling = ''
+    while fen[pos] != ' ':
+        str_castling += fen[pos]
+        pos += 1
+
+    if side==1:
+        str_castling = str_castling.swapcase()
+
+    castling = np.zeros([2,2], dtype=int)
+
+    for c in str_castling:
+        if c == 'K':
+            castling[0][0] = 1
+        if c == 'Q':
+            castling[0][1] = 1
+        if c == 'k':
+            castling[1][0] = 1
+        if c == 'q':
+            castling[1][1] = 1
+
+    while fen[pos] == ' ':
+        pos += 1
+
+    while fen[pos] != ' ':  #skip en passant
+        pos += 1
+
+    while fen[pos] == ' ':
+        pos += 1
+
+    str_move_count = ''
+
+    while fen[pos] != ' ':
+        str_move_count += str(fen[pos])
+        pos += 1
+
+    return bits, int(str_move_count), castling
+
 def train(N):
     root_path = str.format('../{0}x{0}/', N)
 
@@ -237,7 +327,8 @@ def train(N):
     mini_batch_size = config.mini_batch_size
     dm=data_manager(data_path)
     #training_data = dm.load_data2(10)
-    channels = 17
+    slices = 7
+    channels = (slices+1)*14+7
 
     from datetime import datetime
     random.seed(datetime.now())
@@ -259,10 +350,37 @@ def train(N):
         else:
             #code below is to create an initial model
             print("no model was found. create an initial model")
-            export_dir = model_path + 'metagraph-00000000'
-            builder = tf.saved_model.builder.SavedModelBuilder(export_dir)
-            builder.add_meta_graph_and_variables(sess, ['SERVING'])
-            builder.save(as_text=False)
+            export_dir = model_path + '1'
+            os.mkdir(export_dir)
+            frozen_graph = tf.graph_util.convert_variables_to_constants(
+                sess,
+                tf.get_default_graph().as_graph_def(),
+                output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
+            )
+            from tensorflow.python.platform import gfile
+            with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
+                f.write(frozen_graph.SerializeToString())
+
+            # builder = tf.saved_model.builder.SavedModelBuilder(export_dir)
+            #
+            # tensor_info_x = tf.saved_model.utils.build_tensor_info(training_network.states)
+            # tensor_info_y = tf.saved_model.utils.build_tensor_info(training_network.action_prob)
+            # tensor_info_z = tf.saved_model.utils.build_tensor_info(training_network.value)
+            #
+            # prediction_signature = (
+            #     tf.saved_model.signature_def_utils.build_signature_def(
+            #         inputs={'input': tensor_info_x},
+            #         outputs={'action_prob': tensor_info_y, 'value':tensor_info_z},
+            #         method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME))
+            #
+            # builder.add_meta_graph_and_variables(sess, [tf.saved_model.tag_constants.SERVING],
+            #                                      signature_def_map={
+            #                                          'predict': prediction_signature
+            #                                      },
+            #                                      main_op=tf.tables_initializer(),
+            #                                      strip_default_attrs=True
+            #                                      )
+            # builder.save(as_text=False)
             last_model, generation = get_last_model(model_path)
             #return
 
@@ -273,7 +391,7 @@ def train(N):
         #trainables = tf.trainable_variables("training_network")
         reps = 0
         nupdates = 700
-        lr = lambda f: 1e-3 if f < 500 else 1e-4
+        lr = lambda f: 1e-3 if f < 500 else 1e-3
         cliprange = lambda f: 0.2 if f < 500 else 0.1
         #lr = lambda  f: 1e-4
         #cliprange = lambda  f: 0.1
@@ -297,7 +415,8 @@ def train(N):
             #frac = 1.0 * 0.996 ** (update - 1.0)
             print("learning rate:{} Clip Range {}".format(lr(frac), cliprange(frac)))
             inds = np.arange(len(training_data))
-            for _ in range(config.batch_epochs):
+            #first = True
+            for epoch in range(config.batch_epochs):
                 # Randomize the indexes
                 np.random.shuffle(inds)
                 # 0 to batch_size with batch_train_size step
@@ -312,12 +431,15 @@ def train(N):
                     for k in range(len(mbinds)):
                         position = mbinds[k]
                         items = []
-                        state, player, action, pi, reward, oldvalue = training_data[position]
-                        while state != '0'*N*N and len(items) < 7:
+                        step, _, _, _, _, _, _, _, _ = training_data[position]
+
+                        while step >= 0 and len(items) < 7 and position>=0:
                             items.append(training_data[position])
                             position = position - 1
-                            state, player, action, pi, reward, oldvalue = training_data[position]
-                        items.append(training_data[position])
+                            step, _, _, _, _, _, _, _, _ = training_data[position]
+
+                        if position>=0:
+                            items.append(training_data[position])
                         mini_batch.append(items)
 
                     states = []
@@ -327,42 +449,61 @@ def train(N):
                     old_values = []
 
                     for s in mini_batch:
-                        c = None
-                        _, player, action, pi, reward, oldvalue = s[0]
-                        #prevent policy becomes zero
-                        #pi = [p if p != 0 else 1e-5 for p in pi]
-                        for x in s:
-                            state, _, _, _, _, _ = x
-                            a = np.array([int(ltr == str(player)) for i, ltr in enumerate(state)]).reshape((N, N))
-                            b = np.array([int(ltr == str(3-player)) for i, ltr in enumerate(state)]).reshape((N, N))
-                            if c is None:
-                                c = np.array([a, b])
-                            else:
-                                c = np.append(c, [np.array(a), np.array(b)], axis=0)
+                        c = np.zeros([(slices+1)*14+7, 8, 8], dtype=float)
+                        step, fen, side, move, moves, probs, original_probs, reward, oldvalue = s[0]
+                        bits, no_progress_count, castling = fen_to_bitboard(fen, side)
+                        c[0:14] = bits
+                        c[(slices+1)*14].fill(side)
+                        c[(slices+1)*14+1].fill(step)
+                        c[(slices+1)*14+2].fill(castling[0][0])
+                        c[(slices+1)*14+3].fill(castling[0][1])
+                        c[(slices+1)*14+4].fill(castling[1][0])
+                        c[(slices+1)*14+5].fill(castling[1][1])
+                        c[(slices+1)*14+6].fill(no_progress_count)
 
-                        for i in range((channels - 1) // 2 - len(s)):
-                            c = np.append(c, [np.zeros([N, N]), np.zeros([N, N])], axis=0)
-
-                        c = np.append(c, [np.full([N, N], player % 2, dtype=int)], axis=0)
+                        #for v in range(1, len(s)):
+                        #    bits, _, _ = fen_to_bitboard(s[v][1], side)
+                        #    c[v*14:(v+1)*14] = bits
 
                         states.append(c)
-                        actions.append(action)
+                        actions.append(move)
+                        pi = np.zeros(64*73, dtype=float)
+                        for a, b in zip(moves, probs):
+                            pi[a] = b*0.01
                         actions_pi.append(pi)
                         rewards.append(reward)
                         old_values.append(oldvalue)
 
+                    rewards = np.vstack(rewards)
                     feed = {
                         training_network.states: np.array(states),
                         training_network.actions: actions,
                         training_network.actions_pi: actions_pi,
-                        training_network.rewards: np.vstack(rewards),
+                        training_network.rewards: rewards,
                         training_network.old_values: np.vstack(old_values),
                         training_network.learning_rate : lr(frac),
                         training_network.clip_range: cliprange(frac),
                     }
 
-                    global_step, summary, _, action_loss, value_loss, entropy = sess.run([training_network.global_step, training_network.summary_op, training_network.apply_gradients, training_network.actor_loss, training_network.value_loss, training_network.entropy_loss], feed)
-                    print(global_step, action_loss, value_loss, entropy)
+                    global_step, summary, _, action_loss, value_loss, entropy, action_prob, state_value, l2_loss = sess.run([
+                        training_network.global_step,
+                        training_network.summary_op,
+                        training_network.apply_gradients,
+                        training_network.actor_loss,
+                        training_network.value_loss,
+                        training_network.entropy_loss,
+                        training_network.action_prob,
+                        training_network.value,
+                        training_network.l2_loss,
+                    ], feed)
+                    #print(global_step, action_loss, value_loss, l2_loss, action_prob[0][2284], action_prob[1][2504], action_prob[2][525], state_value[0], state_value[1], state_value[2])
+                    print(global_step, action_loss, value_loss, l2_loss, entropy)
+                    # print("value loss=", 0.5*np.mean((rewards-state_value)*(rewards-state_value)))
+                    # if first:
+                    #     first_state_value = state_value[0:10]
+                    #     first = False
+                    # for i in range(10):
+                    #     print(rewards[i], first_state_value[i], state_value[i], (state_value[i]-rewards[i])/(first_state_value[i]-rewards[i]))
 
                     if global_step % 10 == 0:
                         training_network.summary_writer.add_summary(summary, global_step)
@@ -371,9 +512,20 @@ def train(N):
             filename = training_network.save_model("./checkpoints/training.ckpt")
 
             generation = generation + 1
-            builder = tf.saved_model.builder.SavedModelBuilder(model_path+'metagraph-' + str(generation).zfill(8))
-            builder.add_meta_graph_and_variables(sess, ['SERVING'])
-            builder.save(as_text=False)
+            export_dir = model_path + str(generation)
+            os.mkdir(export_dir)
+            frozen_graph = tf.graph_util.convert_variables_to_constants(
+                sess,
+                tf.get_default_graph().as_graph_def(),
+                output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
+            )
+            from tensorflow.python.platform import gfile
+            with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
+                f.write(frozen_graph.SerializeToString())
+
+            # builder = tf.saved_model.builder.SavedModelBuilder(model_path+str(generation))
+            # builder.add_meta_graph_and_variables(sess, [tf.saved_model.tag_constants.SERVING])
+            # builder.save(as_text=False)
 
             last_model, generation = get_last_model(model_path)
             print(last_model + " is saved")
@@ -424,8 +576,11 @@ def train(N):
 if __name__ == "__main__":
     import sys
 
-    n = 5
+    n = 8
 
+    fen_to_bitboard('rn1k1b1r/p2pp1p1/3N3n/qpp4p/P7/R1PPB3/1P1KPPbP/1N2QB1R w - - 4 1', 0)
     if len(sys.argv) == 2:
         n = int(sys.argv[1])
     train(n)
+
+
