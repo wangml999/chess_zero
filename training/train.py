@@ -11,6 +11,7 @@ import sys
 import config
 import shutil
 #from tensorflow.python import debug as tf_debug
+from multiprocessing import Pool
 
 class dihedral_method:
     def __init__(self, N):
@@ -108,9 +109,8 @@ class data_manager:
         procs = []
         print("sampling...")
         for _ in range(batch_size):
-            proc = subprocess.Popen([play_cmd, '-m1', str(generation), '-log', '-s', '-n', str(100)], cwd=r'../bin/')
+            proc = subprocess.Popen(['for i in {1..10}; do ', play_cmd, '-m1', str(generation), '-log', '-s', '-n', str(100), '; done'], cwd=r'../bin/')
             proc.wait()
-
 
     def load_data2(self, most_recent_games, generation, N):
         file_list = []
@@ -138,11 +138,15 @@ class data_manager:
                         fen = line
                         line = f.readline().rstrip('\n')
 
+                        reps = 0
                         try:
-                            current_player, action, move, original_value, value, reward = line.split(',')
+                            current_player, action, move, original_value, value, reward, reps = line.split(',')
                         except:
-                            current_player, action, move, value, reward = line.split(',')
-                            original_value = 0.0
+                            try:
+                                current_player, action, move, original_value, value, reward = line.split(',')
+                            except:
+                                current_player, action, move, value, reward = line.split(',')
+                                original_value = 0.0
 
                         current_player = int(current_player)
                         action = int(action)
@@ -158,8 +162,8 @@ class data_manager:
                         original_probs = [float(p) for p in line.split(',')]
                         assert len(legal_moves) == len(legal_move_probs)
 
-                        if reward!=0:
-                            data.append((step, fen, current_player, action, legal_moves, legal_move_probs, original_probs, reward, original_value))
+                        #if reward!=0:
+                        data.append((step, fen, current_player, action, legal_moves, legal_move_probs, original_probs, reward, original_value, reps))
                         #else:
                         #    data.append((step, fen, current_player, action, legal_moves, legal_move_probs, -1.0, original_value))
                         step=step+1
@@ -232,7 +236,7 @@ def evaluate(cmd, model1, model2, num_games, verbose=False):
             break
     return win1, win2
 
-def fen_to_bitboard(fen, side):
+def fen_to_bitboard(fen, side, reps=0):
     lookup = "PpNnRrBbQqKk"
     side_lookup = "wb"
 
@@ -269,7 +273,8 @@ def fen_to_bitboard(fen, side):
         if(row==0):
             break
 
-    bits[12:14].fill(0)
+    bits[12].fill(reps & 1)
+    bits[13].fill(reps >> 1)
 
     while fen[pos] == ' ':
         pos += 1
@@ -317,6 +322,163 @@ def fen_to_bitboard(fen, side):
 
     return bits, int(str_move_count), castling
 
+def train_model(generation):
+    root_path = str.format('../{0}x{0}/', 8)
+    model_path = root_path + 'models/'
+    data_path = root_path + "data/"
+    slices = 7
+    channels = (slices+1)*14+7
+
+    dm = data_manager(data_path)
+
+    batch_size = config.self_play_file_batch_size
+    mini_batch_size = config.mini_batch_size
+
+    file_list, training_data = dm.load_data2(batch_size, generation, 8)
+    if len(training_data)==0:
+        return
+
+    # tried 0.0001 but no progress in reducing error
+
+    lr = lambda f: 0.00000002 if f < 500 else 2e-4  #0.0002 is the largest for sum loss approach. 0.0001 is a stable pace
+    cliprange = lambda f: 0.2 if f < 500 else 0.1
+
+    # frac = 1.0  - (update - 1.0) / nupdates
+    frac = generation
+    # frac = 1.0 * 0.996 ** (update - 1.0)
+    print("learning rate:{} Clip Range {}".format(lr(frac), cliprange(frac)))
+    inds = np.arange(len(training_data))
+    # first = True
+    gpu_options = tf.compat.v1.GPUOptions()
+    gpu_options.allow_growth = True
+    with tf.compat.v1.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+        # sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
+        # best_network = Network("best_network", sess, N, channels)
+        training_network = Network("training_network", sess, 8, channels, True, "./log/")
+        sess.run(training_network.init_all_vars_op)
+        training_network.restore_model('./checkpoints/')
+        for epoch in range(config.batch_epochs):
+            # Randomize the indexes
+            np.random.shuffle(inds)
+            # 0 to batch_size with batch_train_size step
+            for start in range(0, len(training_data), mini_batch_size):
+                end = start + mini_batch_size
+                if end >= len(training_data) - 1:
+                    end = len(training_data) - 1
+                mbinds = inds[start:end]
+                if len(mbinds) < mini_batch_size / 2:
+                    break
+                mini_batch = []
+                for k in range(len(mbinds)):
+                    position = mbinds[k]
+                    items = []
+                    step, _, _, _, _, _, _, _, _, _ = training_data[position]
+
+                    while step >= 0 and len(items) < 7 and position >= 0:
+                        items.append(training_data[position])
+                        position = position - 1
+                        step, _, _, _, _, _, _, _, _, _ = training_data[position]
+
+                    if position >= 0:
+                        items.append(training_data[position])
+                    mini_batch.append(items)
+
+                states = []
+                actions = []
+                actions_pi = []
+                rewards = []
+                old_values = []
+
+                for s in mini_batch:
+                    c = np.zeros([(slices + 1) * 14 + 7, 8, 8], dtype=float)
+                    step, fen, side, move, moves, probs, original_probs, reward, oldvalue, reps = s[0]
+                    bits, no_progress_count, castling = fen_to_bitboard(fen, side, int(reps) - 1)
+                    c[0:14] = bits
+                    c[(slices + 1) * 14].fill(side)
+                    c[(slices + 1) * 14 + 1].fill(step)
+                    c[(slices + 1) * 14 + 2].fill(castling[0][0])
+                    c[(slices + 1) * 14 + 3].fill(castling[0][1])
+                    c[(slices + 1) * 14 + 4].fill(castling[1][0])
+                    c[(slices + 1) * 14 + 5].fill(castling[1][1])
+                    c[(slices + 1) * 14 + 6].fill(no_progress_count)
+
+                    for v in range(1, len(s)):
+                        _, fen, side, _, _, _, _, _, _, reps = s[v]
+                        bits, _, _ = fen_to_bitboard(fen, side, int(reps) - 1)
+                        c[v * 14:(v + 1) * 14] = bits
+
+                    states.append(c)
+                    actions.append(move)
+                    pi = np.zeros(64 * 73, dtype=float)
+                    for a, b in zip(moves, probs):
+                        pi[a] = b * 0.01
+                    actions_pi.append(pi)
+                    rewards.append(reward)
+                    old_values.append(oldvalue)
+
+                rewards = np.vstack(rewards)
+                feed = {
+                    training_network.states: np.array(states),
+                    training_network.actions: actions,
+                    training_network.actions_pi: actions_pi,
+                    training_network.rewards: rewards,
+                    # training_network.old_values: np.vstack(old_values),
+                    training_network.learning_rate: lr(generation),
+                    training_network.clip_range: cliprange(frac),
+                    training_network.training: True,
+                }
+
+                global_step, summary, _, action_loss, value_loss, action_prob, logits, state_value, l2_loss = sess.run([
+                    training_network.global_step,
+                    training_network.summary_op,
+                    training_network.apply_gradients,
+                    training_network.actor_loss,
+                    training_network.value_loss,
+                    training_network.action_prob,
+                    training_network.logits,
+                    training_network.value,
+                    training_network.l2_loss,
+                    #training_network.nonzero,
+                    #training_network.ce,
+                ], feed)
+                # print(global_step, action_loss, value_loss, l2_loss, action_prob[0][2284], action_prob[1][2504], action_prob[2][525], state_value[0], state_value[1], state_value[2])
+                print(global_step, action_loss, value_loss, l2_loss, np.mean(state_value), np.std(state_value))
+                # print("---max {0}, min {1}, avg {2}, std {3}".format(np.max(state_value), np.min(state_value), np.average(state_value), np.std(state_value)))
+                # print("value loss=", 0.5*np.mean((rewards-state_value)*(rewards-state_value)))
+                # if first:
+                #     first_state_value = state_value[0:10]
+                #     first = False
+                # for i in range(10):
+                #     print(rewards[i], first_state_value[i], state_value[i], (state_value[i]-rewards[i])/(first_state_value[i]-rewards[i]))
+
+                if global_step % 20 == 0:
+                    training_network.summary_writer.add_summary(summary, global_step)
+
+                #if global_step % 150 == 0:
+        print("saving checkpoint...")
+        filename = training_network.save_model("./checkpoints/training.ckpt")
+
+        generation = generation + 1
+        export_dir = model_path + str(generation)
+        os.mkdir(export_dir)
+        frozen_graph = tf.graph_util.convert_variables_to_constants(
+            sess,
+            tf.get_default_graph().as_graph_def(),
+            output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
+        )
+        from tensorflow.python.platform import gfile
+
+        with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
+            f.write(frozen_graph.SerializeToString())
+
+    last_model, generation = get_last_model(model_path)
+    print(last_model + " is saved")
+
+    for f in file_list:
+        base = os.path.splitext(f)[0]
+        os.rename(f, base+".done")
+
+
 def train(N):
     root_path = str.format('../{0}x{0}/', N)
 
@@ -333,21 +495,19 @@ def train(N):
     from datetime import datetime
     random.seed(datetime.now())
     batch_size = config.self_play_file_batch_size
-    gpu_options = tf.GPUOptions()
+
+    last_model, generation = get_last_model(model_path)
+
+    gpu_options = tf.compat.v1.GPUOptions()
     gpu_options.allow_growth = True
-    with tf.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+    last_model, generation = get_last_model(model_path)
+    if last_model == "":
+        with tf.compat.v1.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         #sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
         #best_network = Network("best_network", sess, N, channels)
-        training_network = Network("training_network", sess, N, channels, True, "./log/")
-
-        sess.run(training_network.init_all_vars_op)
-
+            training_network = Network("training_network", sess, N, channels, True, "./log/")
+            sess.run(training_network.init_all_vars_op)
         # restore from previous checkpoint
-        last_model, generation = get_last_model(model_path)
-        if last_model != "":
-            training_network.restore_model('./checkpoints/')
-            #tf.saved_model.loader.load(sess, ['SERVING'], last_model)
-        else:
             #code below is to create an initial model
             print("no model was found. create an initial model")
             export_dir = model_path + '1'
@@ -357,6 +517,8 @@ def train(N):
                 tf.get_default_graph().as_graph_def(),
                 output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
             )
+            print("saving checkpoint...")
+            filename = training_network.save_model("./checkpoints/training.ckpt")
             from tensorflow.python.platform import gfile
             with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
                 f.write(frozen_graph.SerializeToString())
@@ -388,190 +550,229 @@ def train(N):
         #training_to_best_op = copy_src_to_dst("training_network", "best_network")
         #sess.run([training_to_best_op])
 
-        #trainables = tf.trainable_variables("training_network")
-        reps = 0
-        nupdates = 700
-        lr = lambda f: 1e-3 if f < 500 else 1e-3
-        cliprange = lambda f: 0.2 if f < 500 else 0.1
-        #lr = lambda  f: 1e-4
-        #cliprange = lambda  f: 0.1
+    #trainables = tf.trainable_variables("training_network")
+    # reps = 0
+    nupdates = 700
+    # lr = lambda f: 0.02 if f < 500 else 0.002
+    # cliprange = lambda f: 0.2 if f < 500 else 0.1
+    #lr = lambda  f: 1e-4
+    #cliprange = lambda  f: 0.1
 
-        first = True
-        for update in range(generation+1, nupdates+1):
-            # using current generation model to sample batch_size files. each file has 100 games
-            file_list, training_data = dm.load_data2(batch_size, generation, N)
-            if training_data is None or len(training_data)==0:
-                dm.sample(1, generation, N)
-                file_list, training_data = dm.load_data2(batch_size, generation, N)
+    first = True
+    for update in range(generation, nupdates):
+        # using current generation model to sample batch_size files. each file has 100 games
+        #file_list, training_data = dm.load_data2(batch_size, generation, N)
+        #while training_data is None or len(training_data)==0:
+        #    import time
+        #    time.sleep(10)
+        tmplist = [file for file in glob.glob(data_path + "/" + "selfplay-" + format(update, '08') + "*.*")]
+        if len(tmplist)==0:
+            dm.sample(1, update, 8)
+            #file_list, training_data = dm.load_data2(batch_size, generation, N)
 
-            while training_data is None or len(training_data) == 0:
-                import time
-                print("not enough training data. sleep...")
-                time.sleep(config.sleep_seconds)
-                file_list, training_data = dm.load_data2(batch_size, generation, N)
+        train_model(update)
+        exit(0)
+        #with Pool(1) as p:
+        #    p.apply(train_model, (update,))
+        #while training_data is None or len(training_data) == 0:
+        #    import time
+        #    print("not enough training data. sleep...")
+        #    time.sleep(config.sleep_seconds)
+        #    file_list, training_data = dm.load_data2(batch_size, generation, N)
 
-            #frac = 1.0  - (update - 1.0) / nupdates
-            frac = update
-            #frac = 1.0 * 0.996 ** (update - 1.0)
-            print("learning rate:{} Clip Range {}".format(lr(frac), cliprange(frac)))
-            inds = np.arange(len(training_data))
-            #first = True
-            for epoch in range(config.batch_epochs):
-                # Randomize the indexes
-                np.random.shuffle(inds)
-                # 0 to batch_size with batch_train_size step
-                for start in range(0, len(training_data), mini_batch_size):
-                    end = start + mini_batch_size
-                    if end >= len(training_data) - 1:
-                        end = len(training_data) - 1
-                    mbinds = inds[start:end]
-                    if len(mbinds) < mini_batch_size / 2:
-                        break
-                    mini_batch = []
-                    for k in range(len(mbinds)):
-                        position = mbinds[k]
-                        items = []
-                        step, _, _, _, _, _, _, _, _ = training_data[position]
+        # #frac = 1.0  - (update - 1.0) / nupdates
+        # frac = update
+        # #frac = 1.0 * 0.996 ** (update - 1.0)
+        # print("learning rate:{} Clip Range {}".format(lr(frac), cliprange(frac)))
+        # inds = np.arange(len(training_data))
+        # #first = True
+        # with tf.compat.v1.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+        #     # sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
+        #     # best_network = Network("best_network", sess, N, channels)
+        #     training_network = Network("training_network", sess, N, channels, True, "./log/")
+        #     sess.run(training_network.init_all_vars_op)
+        #     training_network.restore_model('./checkpoints/')
+        #     for epoch in range(config.batch_epochs):
+        #         # Randomize the indexes
+        #         np.random.shuffle(inds)
+        #         # 0 to batch_size with batch_train_size step
+        #         for start in range(0, len(training_data), mini_batch_size):
+        #             end = start + mini_batch_size
+        #             if end >= len(training_data) - 1:
+        #                 end = len(training_data) - 1
+        #             mbinds = inds[start:end]
+        #             if len(mbinds) < mini_batch_size / 2:
+        #                 break
+        #             mini_batch = []
+        #             for k in range(len(mbinds)):
+        #                 position = mbinds[k]
+        #                 items = []
+        #                 step, _, _, _, _, _, _, _, _, _ = training_data[position]
+        #
+        #                 while step >= 0 and len(items) < 7 and position>=0:
+        #                     items.append(training_data[position])
+        #                     position = position - 1
+        #                     step, _, _, _, _, _, _, _, _, _ = training_data[position]
+        #
+        #                 if position>=0:
+        #                     items.append(training_data[position])
+        #                 mini_batch.append(items)
+        #
+        #             states = []
+        #             actions = []
+        #             actions_pi = []
+        #             rewards = []
+        #             old_values = []
+        #
+        #             for s in mini_batch:
+        #                 c = np.zeros([(slices+1)*14+7, 8, 8], dtype=float)
+        #                 step, fen, side, move, moves, probs, original_probs, reward, oldvalue, reps = s[0]
+        #                 bits, no_progress_count, castling = fen_to_bitboard(fen, side, int(reps)-1)
+        #                 c[0:14] = bits
+        #                 c[(slices+1)*14].fill(side)
+        #                 c[(slices+1)*14+1].fill(step)
+        #                 c[(slices+1)*14+2].fill(castling[0][0])
+        #                 c[(slices+1)*14+3].fill(castling[0][1])
+        #                 c[(slices+1)*14+4].fill(castling[1][0])
+        #                 c[(slices+1)*14+5].fill(castling[1][1])
+        #                 c[(slices+1)*14+6].fill(no_progress_count)
+        #
+        #                 for v in range(1, len(s)):
+        #                     _, fen, side, _, _, _, _, _, _, reps = s[v]
+        #                     bits, _, _ = fen_to_bitboard(fen, side, int(reps)-1)
+        #                     c[v*14:(v+1)*14] = bits
+        #
+        #                 states.append(c)
+        #                 actions.append(move)
+        #                 pi = np.zeros(64*73, dtype=float)
+        #                 for a, b in zip(moves, probs):
+        #                     pi[a] = b*0.01
+        #                 actions_pi.append(pi)
+        #                 rewards.append(reward)
+        #                 old_values.append(oldvalue)
+        #
+        #             rewards = np.vstack(rewards)
+        #             feed = {
+        #                 training_network.states: np.array(states),
+        #                 training_network.actions: actions,
+        #                 training_network.actions_pi: actions_pi,
+        #                 training_network.rewards: rewards,
+        #                 #training_network.old_values: np.vstack(old_values),
+        #                 training_network.learning_rate : lr(frac),
+        #                 training_network.clip_range: cliprange(frac),
+        #             }
+        #
+        #             global_step, summary, _, action_loss, value_loss, entropy, action_prob, state_value, l2_loss = sess.run([
+        #                 training_network.global_step,
+        #                 training_network.summary_op,
+        #                 training_network.apply_gradients,
+        #                 training_network.actor_loss,
+        #                 training_network.value_loss,
+        #                 training_network.entropy_loss,
+        #                 training_network.action_prob,
+        #                 training_network.value,
+        #                 training_network.l2_loss,
+        #             ], feed)
+        #             #print(global_step, action_loss, value_loss, l2_loss, action_prob[0][2284], action_prob[1][2504], action_prob[2][525], state_value[0], state_value[1], state_value[2])
+        #             print(global_step, action_loss, value_loss, l2_loss, entropy)
+        #             #print("---max {0}, min {1}, avg {2}, std {3}".format(np.max(state_value), np.min(state_value), np.average(state_value), np.std(state_value)))
+        #             # print("value loss=", 0.5*np.mean((rewards-state_value)*(rewards-state_value)))
+        #             # if first:
+        #             #     first_state_value = state_value[0:10]
+        #             #     first = False
+        #             # for i in range(10):
+        #             #     print(rewards[i], first_state_value[i], state_value[i], (state_value[i]-rewards[i])/(first_state_value[i]-rewards[i]))
+        #
+        #             if global_step % 10 == 0:
+        #                 training_network.summary_writer.add_summary(summary, global_step)
+        #
+        #     print("saving checkpoint...")
+        #     filename = training_network.save_model("./checkpoints/training.ckpt")
+        #
+        #     generation = generation + 1
+        #     export_dir = model_path + str(generation)
+        #     os.mkdir(export_dir)
+        #     frozen_graph = tf.graph_util.convert_variables_to_constants(
+        #         sess,
+        #         tf.get_default_graph().as_graph_def(),
+        #         output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
+        #     )
+        #     from tensorflow.python.platform import gfile
+        #     with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
+        #         f.write(frozen_graph.SerializeToString())
 
-                        while step >= 0 and len(items) < 7 and position>=0:
-                            items.append(training_data[position])
-                            position = position - 1
-                            step, _, _, _, _, _, _, _, _ = training_data[position]
+        # builder = tf.saved_model.builder.SavedModelBuilder(model_path+str(generation))
+        # builder.add_meta_graph_and_variables(sess, [tf.saved_model.tag_constants.SERVING])
+        # builder.save(as_text=False)
 
-                        if position>=0:
-                            items.append(training_data[position])
-                        mini_batch.append(items)
+        # last_model, generation = get_last_model(model_path)
+        # print(last_model + " is saved")
 
-                    states = []
-                    actions = []
-                    actions_pi = []
-                    rewards = []
-                    old_values = []
+        # if global_step % config.training_repetition == 0:
+            #     print("saving checkpoint...")
+            #     filename = training_network.save_model("./checkpoints/training.ckpt")
+            #
+            #     if os.path.exists(model_path+'temp/'):
+            #         shutil.rmtree(model_path+'temp/')
+            #
+            #     builder = tf.saved_model.builder.SavedModelBuilder(model_path+'temp/')
+            #     builder.add_meta_graph_and_variables(sess, ['SERVING'])
+            #     builder.save(as_text=False)
+            #
+            #     need_evaluate = False
+            #     if( need_evaluate ):
+            #         import evaluate2 as evaluate
+            #         import math
+            #         print("evaluating checkpoint ...")
+            #
+            #         evaluate.play_cmd = play_cmd
+            #         evaluate.model1 = last_model.split('/')[-1]
+            #         evaluate.model2 = 'temp'
+            #
+            #         old_win, new_win = evaluate.evaluator(4, config.number_eval_games)
+            #         if new_win >= config.number_eval_games * (0.5 + math.sqrt(config.number_eval_games) / config.number_eval_games):
+            #             generation = generation + 1
+            #             os.rename(model_path+'temp', model_path+'metagraph-'+str(generation).zfill(8))
+            #             last_model, generation = get_last_model(model_path)
+            #             print("checkpoint is better. saved to " + 'metagraph-'+str(generation).zfill(8))
+            #         else:
+            #             #shutil.rmtree(model_path+'temp/')
+            #             print("checkpoint is discarded")
+            #     else:
+            #         generation = generation + 1
+            #         os.rename(model_path + 'temp', model_path + 'metagraph-' + str(generation).zfill(8))
+            #         last_model, generation = get_last_model(model_path)
+            #         print("checkpoint is saved")
 
-                    for s in mini_batch:
-                        c = np.zeros([(slices+1)*14+7, 8, 8], dtype=float)
-                        step, fen, side, move, moves, probs, original_probs, reward, oldvalue = s[0]
-                        bits, no_progress_count, castling = fen_to_bitboard(fen, side)
-                        c[0:14] = bits
-                        c[(slices+1)*14].fill(side)
-                        c[(slices+1)*14+1].fill(step)
-                        c[(slices+1)*14+2].fill(castling[0][0])
-                        c[(slices+1)*14+3].fill(castling[0][1])
-                        c[(slices+1)*14+4].fill(castling[1][0])
-                        c[(slices+1)*14+5].fill(castling[1][1])
-                        c[(slices+1)*14+6].fill(no_progress_count)
+        #for i in range(config.self_play_file_increment):
+        #    base = os.path.splitext(file_list[i])[0]
+        #    os.rename(file_list[i], base+".done")
+        # for f in file_list:
+        #     base = os.path.splitext(f)[0]
+        #     os.rename(f, base+".done")
 
-                        #for v in range(1, len(s)):
-                        #    bits, _, _ = fen_to_bitboard(s[v][1], side)
-                        #    c[v*14:(v+1)*14] = bits
+def convert_model():
+    gpu_options = tf.compat.v1.GPUOptions()
+    gpu_options.allow_growth = True
+    with tf.compat.v1.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+        # sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
+        # best_network = Network("best_network", sess, N, channels)
+        channels = (7 + 1) * 14 + 7
+        training_network = Network("training_network", sess, 8, channels, True, "./log/")
+        sess.run(training_network.init_all_vars_op)
+        training_network.restore_model('./checkpoints/')
 
-                        states.append(c)
-                        actions.append(move)
-                        pi = np.zeros(64*73, dtype=float)
-                        for a, b in zip(moves, probs):
-                            pi[a] = b*0.01
-                        actions_pi.append(pi)
-                        rewards.append(reward)
-                        old_values.append(oldvalue)
+        export_dir = '../8x8/models/' + str(7)
+        os.mkdir(export_dir)
+        frozen_graph = tf.graph_util.convert_variables_to_constants(
+            sess,
+            tf.get_default_graph().as_graph_def(),
+            output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
+        )
+        from tensorflow.python.platform import gfile
 
-                    rewards = np.vstack(rewards)
-                    feed = {
-                        training_network.states: np.array(states),
-                        training_network.actions: actions,
-                        training_network.actions_pi: actions_pi,
-                        training_network.rewards: rewards,
-                        training_network.old_values: np.vstack(old_values),
-                        training_network.learning_rate : lr(frac),
-                        training_network.clip_range: cliprange(frac),
-                    }
-
-                    global_step, summary, _, action_loss, value_loss, entropy, action_prob, state_value, l2_loss = sess.run([
-                        training_network.global_step,
-                        training_network.summary_op,
-                        training_network.apply_gradients,
-                        training_network.actor_loss,
-                        training_network.value_loss,
-                        training_network.entropy_loss,
-                        training_network.action_prob,
-                        training_network.value,
-                        training_network.l2_loss,
-                    ], feed)
-                    #print(global_step, action_loss, value_loss, l2_loss, action_prob[0][2284], action_prob[1][2504], action_prob[2][525], state_value[0], state_value[1], state_value[2])
-                    print(global_step, action_loss, value_loss, l2_loss, entropy)
-                    # print("value loss=", 0.5*np.mean((rewards-state_value)*(rewards-state_value)))
-                    # if first:
-                    #     first_state_value = state_value[0:10]
-                    #     first = False
-                    # for i in range(10):
-                    #     print(rewards[i], first_state_value[i], state_value[i], (state_value[i]-rewards[i])/(first_state_value[i]-rewards[i]))
-
-                    if global_step % 10 == 0:
-                        training_network.summary_writer.add_summary(summary, global_step)
-
-            print("saving checkpoint...")
-            filename = training_network.save_model("./checkpoints/training.ckpt")
-
-            generation = generation + 1
-            export_dir = model_path + str(generation)
-            os.mkdir(export_dir)
-            frozen_graph = tf.graph_util.convert_variables_to_constants(
-                sess,
-                tf.get_default_graph().as_graph_def(),
-                output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
-            )
-            from tensorflow.python.platform import gfile
-            with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
-                f.write(frozen_graph.SerializeToString())
-
-            # builder = tf.saved_model.builder.SavedModelBuilder(model_path+str(generation))
-            # builder.add_meta_graph_and_variables(sess, [tf.saved_model.tag_constants.SERVING])
-            # builder.save(as_text=False)
-
-            last_model, generation = get_last_model(model_path)
-            print(last_model + " is saved")
-
-            # if global_step % config.training_repetition == 0:
-                #     print("saving checkpoint...")
-                #     filename = training_network.save_model("./checkpoints/training.ckpt")
-                #
-                #     if os.path.exists(model_path+'temp/'):
-                #         shutil.rmtree(model_path+'temp/')
-                #
-                #     builder = tf.saved_model.builder.SavedModelBuilder(model_path+'temp/')
-                #     builder.add_meta_graph_and_variables(sess, ['SERVING'])
-                #     builder.save(as_text=False)
-                #
-                #     need_evaluate = False
-                #     if( need_evaluate ):
-                #         import evaluate2 as evaluate
-                #         import math
-                #         print("evaluating checkpoint ...")
-                #
-                #         evaluate.play_cmd = play_cmd
-                #         evaluate.model1 = last_model.split('/')[-1]
-                #         evaluate.model2 = 'temp'
-                #
-                #         old_win, new_win = evaluate.evaluator(4, config.number_eval_games)
-                #         if new_win >= config.number_eval_games * (0.5 + math.sqrt(config.number_eval_games) / config.number_eval_games):
-                #             generation = generation + 1
-                #             os.rename(model_path+'temp', model_path+'metagraph-'+str(generation).zfill(8))
-                #             last_model, generation = get_last_model(model_path)
-                #             print("checkpoint is better. saved to " + 'metagraph-'+str(generation).zfill(8))
-                #         else:
-                #             #shutil.rmtree(model_path+'temp/')
-                #             print("checkpoint is discarded")
-                #     else:
-                #         generation = generation + 1
-                #         os.rename(model_path + 'temp', model_path + 'metagraph-' + str(generation).zfill(8))
-                #         last_model, generation = get_last_model(model_path)
-                #         print("checkpoint is saved")
-
-            #for i in range(config.self_play_file_increment):
-            #    base = os.path.splitext(file_list[i])[0]
-            #    os.rename(file_list[i], base+".done")
-            for f in file_list:
-                base = os.path.splitext(f)[0]
-                os.rename(f, base+".done")
+        with gfile.FastGFile(export_dir + "/frozen_model.pb", 'wb') as f:
+            f.write(frozen_graph.SerializeToString())
 
 if __name__ == "__main__":
     import sys
