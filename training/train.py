@@ -114,19 +114,27 @@ class data_manager:
 
     def load_data2(self, most_recent_games, generation, N):
         file_list = []
+
+        # tmplist = [ self.path + f for f in sorted(os.listdir(self.path), key=lambda f: os.path.getmtime("{}/{}".format(self.path, f))) if f.startswith('selfplay')]
+        # if len(tmplist)>0:
+        #     random.shuffle(tmplist)
+        #     file_list = tmplist #[-most_recent_games:]
+
         gen = generation
         while len(file_list) < most_recent_games:
             tmplist = [file for file in glob.glob(self.path+"/"+"selfplay-"+format(gen, '08')+"*.*")]
             if(len(tmplist)==0):
-                break
-            file_list = file_list + tmplist[:most_recent_games-len(file_list)]
+               break
+            file_list = file_list + tmplist #[:most_recent_games-len(file_list)]
             gen = gen - 1
+        random.shuffle(file_list)
+        file_list = file_list[-most_recent_games:]
 
         data = []
         n = 0
         d = dihedral_method(N)
 
-        while n < len(file_list):
+        while n < len(file_list) and len(data) < config.mini_batch_size*1000:
             print("loading self-play file " + file_list[n])
             step = 0
             with open(file_list[n], "r") as f:
@@ -166,6 +174,8 @@ class data_manager:
                         data.append((step, fen, current_player, action, legal_moves, legal_move_probs, original_probs, reward, original_value, reps))
                         #else:
                         #    data.append((step, fen, current_player, action, legal_moves, legal_move_probs, -1.0, original_value))
+                        if len(data) >= config.mini_batch_size*1000:
+                            return file_list, data
                         step=step+1
                     line = f.readline().rstrip('\n')
             n+=1
@@ -340,7 +350,7 @@ def train_model(generation):
 
     # tried 0.0001 but no progress in reducing error
 
-    lr = lambda f: 0.00000002 if f < 500 else 2e-4  #0.0002 is the largest for sum loss approach. 0.0001 is a stable pace
+    lr = lambda f: 0.05 if f < 500 else 2e-4  #0.0002 is the largest for sum loss approach. 0.0001 is a stable pace
     cliprange = lambda f: 0.2 if f < 500 else 0.1
 
     # frac = 1.0  - (update - 1.0) / nupdates
@@ -351,6 +361,7 @@ def train_model(generation):
     # first = True
     gpu_options = tf.compat.v1.GPUOptions()
     gpu_options.allow_growth = True
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
     with tf.compat.v1.Session(graph=tf.Graph(), config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # sess = tf_debug.TensorBoardDebugWrapperSession(sess, "127.0.0.1:7006")
         # best_network = Network("best_network", sess, N, channels)
@@ -364,7 +375,8 @@ def train_model(generation):
             for start in range(0, len(training_data), mini_batch_size):
                 end = start + mini_batch_size
                 if end >= len(training_data) - 1:
-                    end = len(training_data) - 1
+                    #end = len(training_data) - 1
+                    break
                 mbinds = inds[start:end]
                 if len(mbinds) < mini_batch_size / 2:
                     break
@@ -461,7 +473,7 @@ def train_model(generation):
         generation = generation + 1
         export_dir = model_path + str(generation)
         os.mkdir(export_dir)
-        frozen_graph = tf.graph_util.convert_variables_to_constants(
+        frozen_graph = tf.compat.v1.graph_util.convert_variables_to_constants(
             sess,
             tf.get_default_graph().as_graph_def(),
             output_node_names=["training_network/policy_head/out_action_prob", "training_network/value_head/out_value"]
@@ -565,9 +577,9 @@ def train(N):
         #while training_data is None or len(training_data)==0:
         #    import time
         #    time.sleep(10)
-        tmplist = [file for file in glob.glob(data_path + "/" + "selfplay-" + format(update, '08') + "*.*")]
-        if len(tmplist)==0:
-            dm.sample(1, update, 8)
+        #tmplist = [file for file in glob.glob(data_path + "/" + "selfplay-" + format(update, '08') + "*.*")]
+        #if len(tmplist)==0:
+            #dm.sample(1, update, 8)
             #file_list, training_data = dm.load_data2(batch_size, generation, N)
 
         train_model(update)
