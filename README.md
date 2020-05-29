@@ -42,11 +42,10 @@ The program is based on previous go_zero but I changed the algorithm as per Alph
 ```
 
 * test some perft numbers of some specicial board position
-```shell 
-	n1n5/PPPk4/8/8/8/8/4Kppp/5N1N b - - 0 1
-	r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1
-	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-```shell 
+	- n1n5/PPPk4/8/8/8/8/4Kppp/5N1N b - - 0 1
+	- r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1
+	- rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+
 
 ```shell 
 ./chess_r -t 
