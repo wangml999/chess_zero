@@ -1,5 +1,5 @@
 CC=g++
-tensorflow=/home/minglei/Downloads/tensorflow-1.14.0/
+tensorflow=$(HOME)/Downloads/tensorflow-1.14.0/
 bazel-genfiles=$(tensorflow)bazel-genfiles/ 
 package-include=/usr/local/lib/python3.5/dist-packages/tensorflow/include/ 
 eigen=$(tensorflow)third_party/eigen3-c/ 
