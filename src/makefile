@@ -9,7 +9,7 @@ bazel-bin=$(tensorflow)bazel-bin/tensorflow/
 tftrt-path=$(bazel-bin)compiler/tf2tensorrt/python/ops/
 TFT=$(bazel-bin)compiler/tf2tensorrt/
 CUDA=/usr/local/cuda-10.1/targets/x86_64-linux/include/
-TT=/home/minglei/Downloads/workspace/tensorrt/samples/common
+TT=$(HOME)/Downloads/workspace/tensorrt/samples/common
 MAGIC_BITS=../lib/magic-bits/src
 
 go_zero: go_zero
