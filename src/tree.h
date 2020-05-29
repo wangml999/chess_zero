@@ -28,14 +28,16 @@ SOFTWARE.*/
 #include <vector>
 #include <array>
 #include <limits>
-#include "board.h"
-#include "fast_go.h"
+//#include "board.h"
+//#include "fast_go.h"
+#include "bit_board.h"
+#include "chess_board.h"
+#include "config.h"
 #include <math.h>
 #include <algorithm>
 #include <cassert>
 #include <numeric>
 #include <random>
-#include "fast_go.h"
 #include "network.h"
 #include <tensorflow/cc/saved_model/loader.h>
 #include <iomanip>
@@ -43,6 +45,10 @@ SOFTWARE.*/
 
 using namespace std;
 using namespace tensorflow;
+
+extern double timing;
+extern int ActionToInternalMove(int side, int n);
+extern string InternalMoveToString(int m);
 
 class dihedral_method
 {
@@ -81,21 +87,25 @@ public:
     }
 };
 
-
+bool myfunction (int i,int j) { return (i<j); }
 class TreeNode
 {
 private:
 public:
     float total_value;
     float mean_value;
+	float original_value;
     int id;
     Position pos;
     TreeNode *children;
+	int children_num;
     int visits;
     int level;
     char player;
     float prob;
+	//string debugMove;
     TreeNode* parent;
+	BYTE	reps;
     
     TreeNode()
     {
@@ -108,6 +118,8 @@ public:
         prob = 0.0;
         parent = nullptr;
         children = nullptr;
+		children_num = 0;
+		reps = 0;
     }
     
     TreeNode(TreeNode* parent) : TreeNode()
@@ -128,18 +140,22 @@ public:
         }
     }
     
-    float puct_value(float total_visits_sqrt, float cpuct = 0.9, float dir=0.0, float epsilon=0.0)
+    float puct_value(float total_visits_sqrt, float cpuct = CPUCT, float dir=0.0, float epsilon=0.0)
     {
         if(prob < 0.00001)
             return -std::numeric_limits<int>::max();
         else
-            return -mean_value + cpuct * ((1-epsilon)*prob+epsilon*dir) * total_visits_sqrt / (1+visits);
+		{
+			float c = log((total_visits_sqrt*total_visits_sqrt + CPUCT_BASE + 1)/CPUCT_BASE) + cpuct;
+			c *= total_visits_sqrt / (1+visits);
+            return -mean_value + (c) * ((1-epsilon)*prob+epsilon*dir);
+		}
     }
     
     int all_children_visits()
     {
         int all_visits = 0;
-        std::for_each(children, children+NN+1, [&] (TreeNode& node) {
+        std::for_each(children, children+children_num, [&] (TreeNode& node) {
             all_visits += node.visits;
         });
         
@@ -158,12 +174,42 @@ public:
         total_value = total_value + add_value;
         mean_value = total_value / visits;
     }
+
+	TreeNode* GetChild(int n)
+	{
+		for(int i=0; i<children_num; i++)
+			if(children[i].id == n)
+				return &(children[i]);
+		return nullptr;
+		/*int first = 0,                 //first array element
+		last = children_num - 1,            //last array element
+		middle;                        //mid point of search
+
+		while (first <= last)
+		{
+		    middle = (first + last) / 2; //this finds the mid point
+		    if (children[middle].id == n) {
+		        return &(children[middle]);
+		    }
+		    else if (children[middle].id > n) // if it's in the lower half
+		    {
+		        last = middle - 1;
+		    }
+		    else {
+		        first = middle + 1;                 //if it's in the upper half
+		    }
+		}*/
+		//cout << n << " is not found" << endl;
+		//for(int i=0; i<children_num; i++)
+		//	cout << children[i].id << " ";
+		//cout << endl;
+		return nullptr;  // not found
+	}
 };
 
 class Tree
 {
 private:
-    int mode;
     std::mt19937 generator;
     dihedral_method dihedral;
     vector<TreeNode*> expand_buffer;
@@ -173,13 +219,14 @@ private:
     float resign_threshold;
     float resign_prob;
     std::gamma_distribution<float> gamma_dist;
-    vector<float> dirichlet_noise; 
     int mcts_reps;
-    float cpuct;	
-    //atomic<int> count;
+    float cpuct;
 public:
+    vector<float> dirichlet_noise; 
+    int mode;
     TreeNode* root;
     Network* pNetwork;
+    atomic<int> spare;
     
     Tree(int m=EVALUATE, float re_th=-0.9, float re_pro=0.9, int reps=MCTS_REPS, float c=CPUCT) :
             dihedral(),
@@ -188,12 +235,13 @@ public:
             resign_threshold(re_th),
             resign_prob(re_pro),
             gamma_dist(ALPHA),
-            dirichlet_noise(NN+1),
+            //dirichlet_noise(NN+1),
             mcts_reps(reps),
-	    cpuct(c)
+	    	cpuct(c)
     {
         root = new TreeNode();
         pNetwork = nullptr;
+		spare.store(0, memory_order_relaxed);
     }
 
     ~Tree()
@@ -208,7 +256,7 @@ public:
         {
             if(rootNode->children != nullptr)
             {
-                for(int i=0; i<NN+1; i++)
+                for(int i=0; i<rootNode->children_num; i++)
                 {
                     delete_tree(&rootNode->children[i]);
                 }
@@ -227,7 +275,7 @@ public:
         newRoot->parent = nullptr;
         if(newRoot->children != nullptr)
         {
-            for(int i=0; i<NN+1; i++)
+            for(int i=0; i<newRoot->children_num; i++)
                 newRoot->children[i].parent = newRoot;
         }
         
@@ -236,23 +284,27 @@ public:
         root = newRoot;
     }
     
-    int search(Board& board, array<float, NN+1> &search_probs, float &value, std::array<float, NN+1>& child_values )
+    int search(Board& board, vector<int> &actions, vector<float> &search_probs, float &value, std::vector<float>& child_values)
     {
         this->root->pos = board.position;
-        this->root->player = board.current;
+        //this->root->player = board.current;
         
         if(this->root->is_leaf())
         {
+			this->root->reps = board.repetitions[board.position.ZobristHash()];
             float v = expand(this->root);
             this->root->update(1, v);
         }
 
+		dirichlet_noise.resize(root->children_num);
         dirichlet(dirichlet_noise);
         expand_buffer.clear();
-        for(int i=0; i<this->mcts_reps; i++)
+		auto timer_start = std::chrono::high_resolution_clock::now();
+		int finish_reps = (this->mode==EVALUATE)?200000:this->mcts_reps;
+        for(int i=0; i<finish_reps; i++)
         {
             simulate(board);
-            if( expand_buffer.size() == TENSORFLOW_BATCH_SIZE || i==(this->mcts_reps-1))
+            if( expand_buffer.size() == TENSORFLOW_BATCH_SIZE || i==(finish_reps-1))
             {
                 if( expand_buffer.size() > 0)
                 {
@@ -265,19 +317,38 @@ public:
                     expand_buffer.clear();
                 }
             }
+			if(mode == EVALUATE)
+			{
+				int sp = spare.load(memory_order::memory_order_acquire);
+		
+				if(sp==1) // if still waiting for human to input, continue to search
+					continue;
+				if(sp==2) // if human has entered move, stop spare time search
+					break;
+				auto now = std::chrono::high_resolution_clock::now();
+				std::chrono::milliseconds ns = std::chrono::duration_cast<std::chrono::milliseconds>(now-timer_start);
+				if(ns.count()>this->mcts_reps) // in milliseconds
+					break;
+			}
         }
-        
+		if(spare.load(memory_order::memory_order_acquire)==1)
+		{
+			cout << ":::" << flush;
+			//while(spare.load(memory_order::memory_order_acquire)==1)
+				//std::this_thread::yield();
+		}
         std::bernoulli_distribution resign_distribution(resign_prob);
 
         //std::array<float, NN+1> values;
-        for(int i=0; i<NN+1; i++)
+        for(int i=0; i<root->children_num; i++)
         {
             if(this->mcts_reps > 0)
-                search_probs[i] = root->children[i].visits;
+                search_probs.push_back(root->children[i].visits);
             else
-                search_probs[i] = root->children[i].prob;
+                search_probs.push_back(root->children[i].prob); //if it is root, use the base prob. ***this is wrong here. will fix later
             
-            child_values[i] = -root->children[i].mean_value;
+			actions.push_back(root->children[i].id);
+            child_values.push_back(-root->children[i].mean_value);
         }
 
         int n;
@@ -285,35 +356,35 @@ public:
 		//if( max_visit < 1 )
 		//	max_visit = 1;
 
-		array<float, NN+1> decision_probs;
-        for(int i=0; i<NN+1; i++)
-			decision_probs[i] = search_probs[i] / (float)max_visit;
+		vector<float> decision_probs;
+        for(int i=0; i<root->children_num; i++)
+			decision_probs.push_back(search_probs[i] / (float)max_visit);
 
 		float temperature = 0.01;
-        if(mode == SELF_PLAY) // && root->level < min(4, int(0.1*NN)))  //first 10% or first 4 steps are not deterministic to create more randomness
+        if(mode == SELF_PLAY && root->level < 30)  //first 10% or first 4 steps are not deterministic to create more randomness
 			temperature = 1.0;
 		else
 			temperature = 0.01;
 
         float sum = 0.0;
-        for(int i=0; i<NN+1; i++)
+        for(int i=0; i<root->children_num; i++)
         {
 			decision_probs[i] = pow(decision_probs[i], 1.0/temperature);
 			sum = sum + decision_probs[i];
     	}
-        for(int i=0; i<NN+1; i++)
+        for(int i=0; i<root->children_num; i++)
 			decision_probs[i] = decision_probs[i] / sum;
 
         std::discrete_distribution<int> distribution(decision_probs.begin(), decision_probs.end());
         n = distribution(generator);
-        
+        n = root->children[n].id;
 
         sum = 0.0;
-        for(int i=0; i<NN+1; i++)
+        for(int i=0; i<root->children_num; i++)
         {
 			sum = sum + search_probs[i];
     	}
-        for(int i=0; i<NN+1; i++)
+        for(int i=0; i<root->children_num; i++)
         {
 			search_probs[i] = search_probs[i] / sum;
     	}
@@ -337,16 +408,19 @@ public:
         current_node->update(1+VIRTUAL_LOSS, VIRTUAL_LOSS);
         while(!current_node->is_leaf())
         {
-            int action = this->select(current_node);
+            int index = this->select(current_node);
+			int action = current_node->children[index].id;
 
             if(action==NN)
                 local_board.pass_count++;
             else
                 local_board.pass_count = 0;
             
+			if(current_node != root)
+				local_board.repetitions[current_node->pos.ZobristHash()]++;
             local_board.steps++;
             
-            current_node = &(current_node->children[action]);
+            current_node = &(current_node->children[index]);
             current_node->update(1+VIRTUAL_LOSS, VIRTUAL_LOSS);
         }
         //cout << endl;
@@ -355,16 +429,23 @@ public:
         {
             local_board.position = current_node->parent->pos;
             if(current_node->id != NN)
+			{
                 local_board.position = local_board.position.play_move(current_node->id, current_node->parent->player);
+			}
+			local_board.position.side=(local_board.position.side+1)%2;
             local_board.current =  local_board.position.swap_colors(current_node->parent->player);
+			local_board.repetitions[local_board.position.ZobristHash()]++;
         }
         
+		if(local_board.position.bitboards[KING|local_board.position.side] == 0)
+			assert(local_board.position.bitboards[KING|local_board.position.side] != 0);
         int status = local_board.status();
         
         float v = 0.0;
         if(status == -1)
         {
             current_node->pos = local_board.position;
+			current_node->reps = local_board.repetitions[local_board.position.ZobristHash()];
             expand_buffer.push_back(current_node);
         }
         else
@@ -372,8 +453,8 @@ public:
             /*either player actioned will result a win and -1 probability to the next player
             e.g. after player 1 played, player 1 wins and currennt player becomes 2, 2's winning prob is -1
             or after player 2 played, player 2 wins and currennt player becomes 1, 1's winning prob is -1 too*/
-            if(status != 0)
-                if(status == (int)(local_board.current - '0'))
+            if(status == 0 || status == 1)
+                if(status == local_board.current)
                     v = 1.0;   //the winner is player to play
                 else
                     v = -1.0;  //the winner is the player just played.
@@ -421,95 +502,143 @@ public:
 		std::uniform_int_distribution<int> distribution(0,7);
         for(int node_id=0; node_id<leaves.size(); node_id++)
 			if(mode == EVALUATE)	
-            	methods.push_back(distribution(generator));  // we need some randomness in evaluation
+            	methods.push_back(0); //distribution(generator));  // we need some randomness in evaluation
 			else
 	            methods.push_back(0); //distribution(generator));  decided not to transform board in play mode. instead this should be done in train to avoid bias. 
 	Tensor* p_states = nullptr;
+	Tensor* p_action_masks = nullptr;
 
 #ifdef TENSORFLOW_BENCHMARK        
-	auto game_start1 = std::chrono::high_resolution_clock::now();
-	for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
+	//auto game_start1 = std::chrono::high_resolution_clock::now();
+	//for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
 #endif
-            p_states = MakeTensor(leaves, methods);
+        p_states = MakeTensor(leaves, methods);
+		p_action_masks = MakeActionMasksTensor(leaves);
 
 #ifdef TENSORFLOW_BENCHMARK        
-    	auto game_end1 = std::chrono::high_resolution_clock::now();
-    	auto diff1 = game_end1-game_start1;
-    	std::chrono::nanoseconds game_ns1 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff1);
-    	std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x maketensor time: " << game_ns1.count()*1.0/1000000000 << " seconds" << std::endl;
+    	//auto game_end1 = std::chrono::high_resolution_clock::now();
+    	//auto diff1 = game_end1-game_start1;
+    	//std::chrono::nanoseconds game_ns1 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff1);
+    	//std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x maketensor time: " << game_ns1.count()*1.0/1000000000 << " seconds" << std::endl;
 #endif
-        std::vector<std::array<float, NN+1>> tmpprob_vector;
+        std::vector<std::array<float, NN>> tmpprob_vector;
 
 #ifdef TENSORFLOW_BENCHMARK        
 	auto game_start2 = std::chrono::high_resolution_clock::now();
-	for(int i=0; i<MCTS_REPS/TENSORFLOW_BATCH_SIZE; i++)
+	for(int i=0; i<100; i++)
 #endif
-            pNetwork->Forward(*p_states, tmpprob_vector, values);
+//	auto game_start2 = std::chrono::high_resolution_clock::now();
+        assert(pNetwork->Forward(*p_states, *p_action_masks, tmpprob_vector, values));
+//	auto game_end2 = std::chrono::high_resolution_clock::now();
+//	auto diff2 = game_end2-game_start2;
+//	std::chrono::nanoseconds game_ns2 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff2);
+//	timing += game_ns2.count()*1.0/1000000000;		
 #ifdef TENSORFLOW_BENCHMARK
     	auto game_end2 = std::chrono::high_resolution_clock::now();
     	auto diff2 = game_end2-game_start2;
     	std::chrono::nanoseconds game_ns2 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff2);
     	std::cout << MCTS_REPS/TENSORFLOW_BATCH_SIZE << "x forward time: " << game_ns2.count()*1.0/1000000000 << " seconds" << std::endl;
 #endif
-        //pNetwork->Forward_Simulator(states, tmpprob_vector, values);
+        //pNetwork->Forward_Simulator(*p_states, tmpprob_vector, values);
 	delete p_states;
+	delete p_action_masks;
      
         for(int node_id=0; node_id<leaves.size(); node_id++)
         {
             TreeNode* leaf = leaves[node_id];
             if(leaf->children == nullptr)
             {
-                std::array<float, NN+1> prob;
+                std::array<float, NN> prob;
                 float sum_of_probs = 0.0;
-                std::for_each(tmpprob_vector[node_id].begin(), tmpprob_vector[node_id].end(), [&] (float v) {
+
+               /* std::for_each(tmpprob_vector[node_id].begin(), tmpprob_vector[node_id].end(), [&] (float v) {
                     sum_of_probs += v;
                 });
             
+
                 std::for_each(tmpprob_vector[node_id].begin(), tmpprob_vector[node_id].end(), [=] (float& v) {
                     v = v / sum_of_probs;
-                });
+                });*/
 
-				int method = methods[node_id];
+				/*int method = methods[node_id];
                 if (method != 0)
                 {
                     for(int i=0; i<NN; i++)
                         prob[i] = tmpprob_vector[node_id][dihedral.data[method][i]];
                     prob[NN] = tmpprob_vector[node_id][NN];
                 }
-                else
+                else*/
                     prob = tmpprob_vector[node_id];
 
-                for(int i=0; i<=NN; i++)  // test code. clip any prob smaller than 0.01 to give chance being selected in MCTS.
-					if( prob[i] < 0.01 )
-						prob[i] = 0.01;
 
-                std::vector<int> moves = leaf->pos.not_allowed_actions(leaf->player);
-            
+                /*for(int i=0; i<NN; i++)  // test code. clip any prob smaller than 0.01 to give chance being selected in MCTS.
+					if( prob[i] < 0.01 )
+						prob[i] = 0.01;*/
+
+				if(leaf->player != leaf->pos.side)
+				{
+					assert(leaf->player == leaf->pos.side);
+				}
+                std::vector<int> moves = leaf->pos.legal_actions(leaf->player);
+
+
+                sum_of_probs = 0.0;
                 std::for_each(moves.begin(), moves.end(), [&](int x){
-                    prob[x] = 0.0;
+					sum_of_probs += exp(prob[x]);
+				});
+
+                std::for_each(moves.begin(), moves.end(), [&](int x){
+					prob[x] = exp(prob[x]) / sum_of_probs;
+				});
+
+
+
+				/*std::array<int, NN> action_mask;
+				std::fill(action_mask.begin(), action_mask.end(), 0);
+
+                std::for_each(moves.begin(), moves.end(), [&](int x){
+                    //prob[x] = -prob[x];
+					action_mask[x] = 1;
                 });
+
+				for(int i=0; i<NN; i++)
+				{
+					if(prob[i] == 0 && action_mask[i] != 0)
+					{
+						cout << "found zero action prob" << endl;
+					}
+					prob[i] = prob[i] * action_mask[i];
+				}
+
+				prob[NN]=0.0;
 
                 //normalize prior probilities
                 sum_of_probs = 0.0;
+
                 std::for_each(prob.begin(), prob.end(), [&] (float v) {
-                    sum_of_probs += v;
+					if(v!=0)
+                    	sum_of_probs += exp(v);
                 });
             
                 std::for_each(prob.begin(), prob.end(), [=] (float& v) {
-                    v = v / sum_of_probs;
-                });
+					if(v!=0)
+                		v = exp(v) / sum_of_probs;
+                });*/
 
-                TreeNode *tmp = new TreeNode[NN+1];
+                TreeNode *tmp = new TreeNode[moves.size()];
                 char next_player = leaf->pos.swap_colors(leaf->player);
-                for(int i=0; i<NN+1; i++)
+                for(int i=0; i<moves.size(); i++)
                 {
-                    tmp[i].id = i;
+                    tmp[i].id = moves[i];
                     tmp[i].parent = leaf;
-                    tmp[i].prob = prob[i];
+                    tmp[i].prob = prob[moves[i]];
                     tmp[i].player = next_player;
                     tmp[i].level = leaf->level + 1;
+					//tmp[i].debugMove = InternalMoveToString(ActionToInternalMove(leaf->player, moves[i]));
                 }
                 leaf->children = tmp;
+				leaf->children_num = moves.size();
+				leaf->original_value = values[node_id];
             }
         }
     }
@@ -534,17 +663,18 @@ public:
         assert(parent->children != nullptr);
         
         float total_visits_sqrt = sqrt(parent->visits);
-        array<float, NN+1> uct;
+        vector<float> uct(parent->children_num, 0.0f);
+
 #ifdef ADD_DIRICHLET_NOISE
         if (parent->parent == nullptr && mode == SELF_PLAY)
         {
-            for(int i=0; i<NN+1; i++)
+            for(int i=0; i<parent->children_num; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, cpuct, dirichlet_noise[i], 0.25);
         }
         else
 #endif
         {
-            for(int i=0; i<NN+1; i++)
+            for(int i=0; i<parent->children_num; i++)
                 uct[i] = parent->children[i].puct_value(total_visits_sqrt=total_visits_sqrt, cpuct);
         }
 
@@ -554,64 +684,124 @@ public:
         {
             std::cout<<"action pass"<<std::endl;
         }*/
-        
+
         return action;
     }
     
+	Tensor* MakeActionMasksTensor(vector<TreeNode*>& nodes)
+	{
+        int batch_size = nodes.size();
+        Tensor* p_tensor = new Tensor(DT_FLOAT, TensorShape({TENSORFLOW_BATCH_SIZE, 73*64}));
+		
+        float* ptensor_data = p_tensor->flat<float>().data();
+		memset(ptensor_data, 0, sizeof(float) * TENSORFLOW_BATCH_SIZE * 73 * 64);
+        for(int b=0; b<batch_size; b++)
+        {
+			TreeNode *p = nodes[b];
+            std::vector<int> moves = p->pos.legal_actions(p->player); 
+			assert(moves.size()!=0);
+            std::for_each(moves.begin(), moves.end(), [&](int x){
+                ptensor_data[b*73*64+x] = 1;
+            });
+		}
+		return p_tensor;
+	}
+
     Tensor* MakeTensor(vector<TreeNode*>& nodes, vector<int>& methods)
     {
         assert(nodes.size() > 0);
         int batch_size = nodes.size();
-        Tensor* p_states = new Tensor(DT_FLOAT, TensorShape({batch_size, (SLICES+1)*2+1, WN, WN}));
+		int slice_num = (pNetwork->dim1-7)/14-1;
+			
+        Tensor* p_states = new Tensor(DT_FLOAT, TensorShape({TENSORFLOW_BATCH_SIZE, (slice_num+1)*14+7, 8, 8}));
+		
         float* ptensor_data = p_states->flat<float>().data();
+		memset(ptensor_data, 0, sizeof(float) * (TENSORFLOW_BATCH_SIZE * ((slice_num+1)*14+7) * 8 * 8));
         
         //std::thread t[TENSORFLOW_BATCH_SIZE];
         
         for(int b=0; b<batch_size; b++)
         {
-	    int method = methods[b];	
+		    int method = methods[b];	
             //t[b] = std::thread([=](){
-                /*thread_local*/ TreeNode *p = nodes[b];
-                char current = p->player;
-                char opponent = p->pos.swap_colors(current);
-                
-                for(int slice=0; slice<(SLICES+1)*2; slice+=2)
+                /*thread_local*/ 
+			TreeNode *p = nodes[b];
+            char current = p->pos.side;
+            char enermy = p->pos.swap_colors(current);
+			assert(p->reps>=0 && p->reps<3);
+            
+            float* pslicehead = ptensor_data + b * ((slice_num+1)*14+7)*64;
+			float* pp = pslicehead;
+            for(int slice=0; slice<slice_num+1; slice++)
+            {
+                std::string state;
+
+                if( p!=nullptr )
                 {
-                    std::string state;
-                    
-                    float* pdata1 = ptensor_data + b * ((SLICES+1)*2+1) * NN + slice * NN;
-                    float* pdata2 = ptensor_data + b * ((SLICES+1)*2+1) * NN + (slice+1) * NN;
-                    if( p!=nullptr )
+					BYTE work_board_array[64];
+					if(current==WHITE)
+					{
+						for(int i=0; i<64; i++)
+							work_board_array[i] = p->pos.board_array[i];
+					}
+					else
+					{
+						for(int i=0; i<64; i++)
+							work_board_array[63-i] = p->pos.board_array[i];
+					}
+
+					for(int i=0; i<64; i++)
+					{
+						if(work_board_array[i]==EMPTY)
+							continue;
+						assert(work_board_array[i]>=PAWN);
+						int piece=work_board_array[i] & 0xfe;
+						int color = work_board_array[i] & 0x1;
+						int is_enermy = (color==current)?0:1;
+						int k = ((piece>>1)-1)+is_enermy*6;
+
+						pp[k*64+i] = 1;
+					}
+					pp+=(12*64);
+					//slide 12th and 13th are repetitions. same for both blackwhite and 
+
+					std::fill(pp, pp+64, (p->reps-1)&0b01);  // repetition. 2 planes. 0, 1, 2 stands for 1, 2, 3
+					pp+=64;
+					std::fill(pp, pp+64, ((p->reps-1)&0b10)>>1);
+					pp+=64;
+					assert(pp-pslicehead == (slice+1)*14*64);
+                }
+                else
+                {
+                    /*for(int i=0; i<NN; i++)
                     {
-                        state = p->pos.get_board();
-                        for(int i=0; i<NN; i++)
-                        {
-                            char c = state[dihedral.data[method][i]];
-                            *pdata1++ = (c == current);
-                            *pdata2++ = (c == opponent);
-                        }
-                    }
-                    else
-                    {
-                        for(int i=0; i<NN; i++)
-                        {
-                            *pdata1++ = 0;
-                            *pdata2++ = 0;
-                        }
-                    }
-                    
-                    if(p != root && p != nullptr)
-                        p = p->parent;
-                    else
-                        p = nullptr;
+                        *pdata1++ = 0;
+                        *pdata2++ = 0;
+                    }*/
+					//memset(pp, 0, 14*64);
+					pp+=(14*64);
                 }
                 
-                //last slice is the color of current player. 1 black or 0 white
-                float* pdata = ptensor_data + b * ((SLICES+1)*2+1) * NN + (SLICES+1)*2 * NN;
-                for(int i=0; i<NN; i++)
-                {
-                    *pdata++ = (current == BLACK);
-                }
+                if(p != root && p != nullptr)
+                    p = p->parent;
+                else
+                    p = nullptr;
+            }
+			
+			std::fill(pp, pp+64, current);  // current side
+			pp+=64;
+			std::fill(pp, pp+64, nodes[b]->level); // total move count
+			pp+=64;
+			std::fill(pp, pp+64, (nodes[b]->pos.castling_rights>>(current*2))&0x1);		// p1 king castling
+			pp+=64;
+			std::fill(pp, pp+64, (nodes[b]->pos.castling_rights>>(current*2+1))&0x1);	// p1 queen castling
+			pp+=64;
+			std::fill(pp, pp+64, (nodes[b]->pos.castling_rights>>(enermy*2))&0x1);		// p2 king castling
+			pp+=64;
+			std::fill(pp, pp+64, (nodes[b]->pos.castling_rights>>(enermy*2+1))&0x1);	// p2 queen castling
+			pp+=64;
+			std::fill(pp, pp+64, nodes[b]->pos.fifty_moves);
+			pp+=64;
             //});
         }
         
