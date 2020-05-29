@@ -24,7 +24,7 @@ The program is based on previous go_zero but I changed the algorithm as per Alph
 ```shell
 ./chess_r -m1 [model number1] -m2 [model number2] -n 100 -s
 ```
-  this can be to evaluate two networks and plays 400 games without displaying board of each step. 
+  this is to evaluate two models by playing 100 games and showing the winners and some other stats. 
   
 * play with human
 ```shell
