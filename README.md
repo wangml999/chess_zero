@@ -2,6 +2,7 @@
 After finishing go_zero project, I thought to try the chess too just because my son was learning chess and I thought if I can train a program to compete with him. 
 I did not expect it would be an advanced player as I know the computer power is there. But just to try how far I can go. 
 The program is based on previous go_zero but I changed the algorithm as per AlphaZero paper. And wrote a chess board in c++.
+AlphaZero paper can be found at https://arxiv.org/pdf/1712.01815.pdf
 
 ## What's included
 * A chess player program written in c++11. 
@@ -36,7 +37,7 @@ The program is based on previous go_zero but I changed the algorithm as per Alph
 ![alt text](chess_screen.png)
  
 ## other features
-* check perft number and evaluate the chess engine speed. ref https://www.chessprogramming.org/Perft_Results 
+* check perft number and evaluate the chess engine speed. https://www.chessprogramming.org/Perft_Results has more details on what this perft number means.
 ```shell 
 ./chess_r -p [depth] 
 ```
