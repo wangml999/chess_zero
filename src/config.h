@@ -19,7 +19,8 @@
 
 #define MCTS_REPS 800
 
-#define CPUCT 0.9
+#define CPUCT 1.25
+#define CPUCT_BASE	19652
 #define VIRTUAL_LOSS  10
 
 #define ADD_DIRICHLET_NOISE
