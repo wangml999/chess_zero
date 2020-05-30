@@ -9,7 +9,7 @@ AlphaZero paper can be found at https://arxiv.org/pdf/1712.01815.pdf
 * A trainer written in python 3. 
 
 ## What's required
-* Library magic-bit to generate magic bit files .magic. .magic files need to be placed in the bin directory to be used at runtime. Thanks to https://github.com/goutham/magic-bits
+* Library magic-bit to generate magic bit files .magic. .magic files need to be placed in the bin directory to be used at runtime. Thanks to https://github.com/goutham/magic-bits. Magic BitBoard https://www.chessprogramming.org/Magic_Bitboards
 * Compile tensorflow from source code. Following the link to install tensorflow https://www.tensorflow.org/install/install_sources
 * tensorflow r1.14. Later version has not been tested. One addtional step after compile tensorflow as per the instruction is to compile the //tensorflow:libtensorflow.so which will be used in the c++ player. 
 * The tensorflow include and lib paths in the makefile need to be updated accordingly.
@@ -23,9 +23,9 @@ AlphaZero paper can be found at https://arxiv.org/pdf/1712.01815.pdf
   
 * evaluation
 ```shell
-./chess_r -m1 [model number1] -m2 [model number2] -n 100 -s
+./chess_r -m1 [model number1] -m2 [model number2] -n 100 -s -e 2000
 ```
-  this is to evaluate two models by playing 100 games and showing the winners and some other stats. 
+  this is to evaluate two models by playing 100 games and showing the winners and some other stats. -e [millsecond] option is to limit each engine's time on Monte Carlo Tree Search. 
   
 * play with human
 ```shell
@@ -53,6 +53,15 @@ AlphaZero paper can be found at https://arxiv.org/pdf/1712.01815.pdf
 ```
 
 ## training
+* When there is no models, it creates a random model for selfplaying. 
+* Polling selfplay data files directory, it loads maximum config.self_play_file_batch_size files from all previous generations with each file has 100 game's moves. 
+* Randomly sampling in the dataset to create mini-batch and feed into the network to train. 
 
+```shell
+python3 train.py
+```shell
 
+## integrating training and selfplaying
+* a sample shell batch file run.sh is used to run selfplaying to create some data files and training the network. 
+* looping this process and evaluate the network in the meantime. 
 
