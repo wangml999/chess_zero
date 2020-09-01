@@ -59,7 +59,7 @@ AlphaZero paper can be found at https://arxiv.org/pdf/1712.01815.pdf
 
 ```shell
 python3 train.py
-```shell
+```
 
 ## integrating training and selfplaying
 * a sample shell batch file run.sh is used to run selfplaying to create some data files and training the network. 
